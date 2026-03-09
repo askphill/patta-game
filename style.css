@@ -1,37 +1,25 @@
-@keyframes slideright {
-    from {
-        background-position: 70000%;
-    }
-    to {
-        background-position: 0%;
-    }
-}
-
-#desert {
-    position: absolute;
-    background-image: url("t-rex-background.png");
-    height: 200px;
-    width: 100%;
-    animation: slideright 600s infinite linear;
-    bottom: 0;
-}
-
-.dino {
-    background-image: url("t-rex.png");
-    height: 60px;
-    width: 60px;
-    position: absolute;
-    bottom: 0;
-}
-
-.obstacle {
-    background-image: url('cacti.png');
-    width: 60px;
-    height: 60px;
-    position: absolute;
-    bottom: 0;
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
 }
 
 body {
-    background-color: rgb(250, 250, 250);
+    background-color: #1a1a2e;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    overflow: hidden;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+canvas {
+    border: 4px solid #e94560;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    max-width: 100vw;
+    max-height: 100vh;
 }
