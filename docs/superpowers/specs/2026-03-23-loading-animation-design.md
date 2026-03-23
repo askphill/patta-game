@@ -19,14 +19,16 @@ Structure: A `<div id="loading-overlay">` is added to `index.html`, positioned a
 
 ## Prerequisites: Assets
 
-The following assets must be added to the project before implementation. The current repo only has old T-Rex images which should be replaced.
+The following assets are pulled directly from Figma using the Figma MCP (`get_design_context` / `get_screenshot`) during implementation. The current repo only has old T-Rex images which should be replaced.
 
-| Asset | Filename | Source |
-|-------|----------|--------|
-| Patta script logo (white) | `assets/patta-logo.png` | Export from Figma node `0:161` |
-| Nike swoosh (white) | `assets/nike-swoosh.png` | Export from Figma node `0:162` |
-| Tournament pattern tile | `assets/pattern-tile.png` | Export from Figma Frame 17 (`0:6`) |
-| Tournament title graphic | `assets/tournament-title.png` | Export from Figma — "International Patta Soccer Tournament" red/orange retro text |
+| Asset | Filename | Figma Source |
+|-------|----------|-------------|
+| Patta script logo (white) | `assets/patta-logo.png` | Node `0:161` via Figma MCP |
+| Nike swoosh (white) | `assets/nike-swoosh.png` | Node `0:162` via Figma MCP |
+| Tournament pattern tile | `assets/pattern-tile.png` | Frame 17 (`0:6`) via Figma MCP |
+| Tournament title graphic | `assets/tournament-title.png` | Title element via Figma MCP |
+
+Assets are exported using the Figma MCP tools at implementation time — no manual export step needed.
 
 ## Phase 1: Loading (Progress Bar)
 
@@ -127,10 +129,15 @@ At any point during Phases 1-3, the user can **tap anywhere or press Space** to 
 **DOM overlay with CSS animations and JS asset loader:**
 - `<div id="loading-overlay">` contains all loading/splash/menu DOM elements
 - JS preloads images via `new Image()`, updates progress bar width via CSS variable (`--progress`)
-- All transitions (logo slide, splash reveal, menu fade-in) are CSS transitions/keyframes
+- All transitions within the loading sequence (logo slide, splash reveal, menu fade-in) are CSS transitions/keyframes
 - Animation phases chained via `transitionend`/`animationend` event listeners
-- "Play Game" button triggers: overlay fade-out (300ms), then `overlay.style.display = 'none'`, then game start
 - No external dependencies
+
+**CSS View Transitions API for page-level transitions:**
+- The transition from menu → game uses `document.startViewTransition()` for a smooth cross-fade
+- "Play Game" button triggers a view transition: the overlay fades out while the canvas fades in
+- Fallback: if `View Transitions API` is unsupported, fall back to a simple opacity transition
+- View transitions may also be used for future screen changes (e.g., game → leaderboard) if needed
 
 ## Timing Summary
 
