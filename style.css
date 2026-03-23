@@ -1,3 +1,11 @@
+@font-face {
+    font-family: 'Neue Pixel Grotesk';
+    src: url('assets/Neue-Pixel-Grotesk.woff2') format('woff2');
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
 :root {
     /* View transition */
     --view-transition-easing: cubic-bezier(.5, .3, 0, 1);
@@ -237,6 +245,118 @@ canvas.active {
     transition: opacity 0.3s var(--ease-out-cubic);
 }
 
+/* Game start overlay: orange gradient + "TAP SPACE TO START" */
+.game-start-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 160px;
+    background: linear-gradient(to bottom, rgba(219, 109, 42, 0) 0%, rgba(219, 109, 42, 0.6) 73.558%);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: 20px;
+    z-index: 3;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s var(--ease-out-cubic);
+}
+
+.splash-panel.game-active .game-start-overlay {
+    opacity: 1;
+}
+
+.splash-panel.game-playing .game-start-overlay {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* ── GAME OVER STATE ── */
+.splash-panel.game-over canvas {
+    filter: grayscale(1) brightness(0.3);
+}
+
+/* Game over overlay */
+.game-over-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 4;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s var(--ease-out-cubic);
+}
+
+.splash-panel.game-over .game-over-overlay {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.game-over-score {
+    font-family: 'Neue Pixel Grotesk', monospace;
+    font-size: 223px;
+    font-weight: bold;
+    color: #fff;
+    line-height: 1;
+}
+
+.btn-submit-score {
+    width: 263px;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    display: block;
+    position: absolute;
+    top: 85%;
+    left: 50%;
+    transform: translateX(-50%);
+    transition: transform 0.15s var(--ease-out-cubic), filter 0.15s var(--ease-out-cubic);
+}
+
+.btn-submit-score img {
+    width: 100%;
+    height: auto;
+    display: block;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+}
+
+.btn-submit-score:hover {
+    transform: translateX(-50%) translateY(-1px) scale(1.02);
+    filter: brightness(1.1);
+}
+
+.btn-submit-score:active {
+    transform: translateX(-50%) translateY(1px) scale(0.98);
+    filter: brightness(0.92);
+    transition-duration: 0.1s;
+}
+
+.start-prompt {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.start-prompt span {
+    font-family: 'Neue Pixel Grotesk', monospace;
+    font-size: 15px;
+    color: #fff;
+    white-space: nowrap;
+}
+
+.key-space {
+    width: 82px;
+    height: 38px;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+}
+
 .tournament-title {
     width: 66.5%;
     max-width: 268px;
@@ -351,7 +471,7 @@ canvas.active {
     right: 0;
     text-align: center;
     color: #fff;
-    font-family: monospace;
+    font-family: 'Neue Pixel Grotesk', monospace;
     font-size: 13px;
     opacity: 0;
     transition: opacity 0.3s var(--ease-out-sine);

@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Patta International Soccer Tournament</title>
+    <link rel="preload" href="assets/Neue-Pixel-Grotesk.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
@@ -19,7 +20,24 @@
 
         <!-- Phase 3: Splash panel (hidden initially) -->
         <div class="splash-panel">
-            <canvas id="game" width="403" height="698"></canvas>
+            <canvas id="game"></canvas>
+
+            <!-- Game start overlay -->
+            <div class="game-start-overlay">
+                <div class="start-prompt">
+                    <span>TAP</span>
+                    <img src="assets/key-space.png" alt="Space" class="key-space" draggable="false" />
+                    <span>TO START</span>
+                </div>
+            </div>
+
+            <!-- Game over overlay -->
+            <div class="game-over-overlay">
+                <div class="game-over-score"></div>
+                <button class="btn-submit-score" aria-label="Submit Score">
+                    <img src="assets/btn-submit.png" alt="Submit Score" draggable="false" />
+                </button>
+            </div>
 
             <img src="assets/tournament-title.png" alt="International Patta Soccer Tournament" class="tournament-title" />
 

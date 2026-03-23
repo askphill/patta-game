@@ -1,6 +1,16 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
+// ── RETINA / HiDPI SUPPORT ──
+const DPR = window.devicePixelRatio || 1;
+const CSS_W = 403;
+const CSS_H = 698;
+canvas.width = CSS_W * DPR;
+canvas.height = CSS_H * DPR;
+canvas.style.width = CSS_W + 'px';
+canvas.style.height = CSS_H + 'px';
+ctx.scale(DPR, DPR);
+
 // ── LOADING OVERLAY CONTROLLER ──
 const overlay = document.getElementById('loading-overlay');
 const progressFill = document.querySelector('.progress-fill');
@@ -9,6 +19,9 @@ const splashPanel = document.querySelector('.splash-panel');
 const menuButtons = document.querySelectorAll('.menu-btn');
 const menuFooter = document.querySelector('.menu-footer');
 const btnPlay = document.querySelector('.btn-play');
+const gameOverOverlay = document.querySelector('.game-over-overlay');
+const gameOverScore = document.querySelector('.game-over-score');
+const btnSubmitScore = document.querySelector('.btn-submit-score');
 
 const ASSETS_TO_LOAD = [
     'assets/patta-logo.png',
@@ -20,6 +33,12 @@ const ASSETS_TO_LOAD = [
     'assets/btn-collection.png',
     'assets/btn-leaderboard.png',
     'assets/soccer-ball.png',
+    'assets/bg-level1.jpg',
+    'assets/bg-level2.jpg',
+    'assets/bg-level3.jpg',
+    'assets/bg-level4.jpg',
+    'assets/key-space.png',
+    'assets/btn-submit.png',
 ];
 
 let loadedCount = 0;
@@ -195,11 +214,29 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+let gameOverTime = 0;
+const GAME_OVER_COOLDOWN = 600; // ms before tap-to-retry works
+
+function showGameOver() {
+    if (score > highScore) {
+        highScore = score;
+        localStorage.setItem('keepballup_high', highScore.toString());
+    }
+    gameOverScore.textContent = score;
+    splashPanel.classList.add('game-over');
+    gameOverTime = Date.now();
+}
+
+function hideGameOver() {
+    splashPanel.classList.remove('game-over');
+}
+
 function startGame() {
-    // Show canvas inside the panel, hide menu content
+    // Show canvas + start overlay inside the panel, hide menu content
     splashPanel.classList.add('game-active');
     canvas.classList.add('active');
-    update(); // Start the game loop
+    // Draw first frame (background + ball) but don't start playing yet
+    update();
 }
 
 btnPlay.addEventListener('click', (e) => {
@@ -210,6 +247,35 @@ btnPlay.addEventListener('click', (e) => {
 // Prevent other menu buttons from triggering skip
 document.querySelectorAll('.menu-btn').forEach(btn => {
     btn.addEventListener('click', (e) => e.stopPropagation());
+});
+
+// Submit score button
+btnSubmitScore.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // TODO: implement score submission
+});
+
+function backToMenu() {
+    hideGameOver();
+    splashPanel.classList.remove('game-active', 'game-playing');
+    canvas.classList.remove('active');
+    state = 'start';
+    resetGame();
+}
+
+document.addEventListener('keydown', (e) => {
+    // Enter = Play Game (from menu) or Submit Score (game over)
+    if (e.code === 'Enter') {
+        if (state === 'over' && splashPanel.classList.contains('game-over')) {
+            btnSubmitScore.click();
+        } else if (!splashPanel.classList.contains('game-active') && menuButtons[0].classList.contains('visible')) {
+            startGame();
+        }
+    }
+    // Escape = back to menu
+    if (e.code === 'Escape' && splashPanel.classList.contains('game-active')) {
+        backToMenu();
+    }
 });
 
 // Skip loading animation on repeat visits (session)
@@ -237,21 +303,28 @@ if (sessionStorage.getItem('patta-loaded')) {
 const GRAVITY = 0.3;
 const KICK_FORCE = -10;
 const BALL_SIZE = 24;
-const GROUND_Y = canvas.height - 40;
+const GROUND_Y = CSS_H - 40;
 
-// Hit zone: starts from ground to halfway, shrinks to 5% at bottom
-const PLAY_HEIGHT = GROUND_Y;                    // full playable height
-const ZONE_HEIGHT_START = PLAY_HEIGHT * 0.5;     // starts at 50% of screen
-const ZONE_HEIGHT_MIN = PLAY_HEIGHT * 0.05;      // shrinks to 5%
-const ZONE_SHRINK_SCORE = 50;                    // score at which zone reaches minimum
+// Hit zone: full-width rectangle, shrinks in height toward a 4px line
+const ZONE_CENTER_Y = CSS_H * 0.455;
+const ZONE_HEIGHT_START = 550;   // starts tall (nearly full panel)
+const ZONE_HEIGHT_MIN = 4;       // shrinks to a thin line
+const ZONE_SHRINK_SCORE = 50;
 
 // ── LEVEL SYSTEM ──
 const LEVELS = [
-    { name: 'TRAINING FIELD', threshold: 0,  bg: '#0f0e17', ground: '#2e7d32', groundDark: '#1b5e20', groundLine: '#4caf50' },
-    { name: 'LOCAL STADIUM',  threshold: 20, bg: '#0a0a1a', ground: '#1b6e1f', groundDark: '#145216', groundLine: '#3d9b40' },
-    { name: 'BIG STADIUM',    threshold: 40, bg: '#060612', ground: '#166b19', groundDark: '#0f4a12', groundLine: '#2e8630' },
-    { name: 'WORLD CUP',      threshold: 60, bg: '#030308', ground: '#0f5c12', groundDark: '#0a3f0d', groundLine: '#228025' },
+    { name: 'TRAINING FIELD', threshold: 0,  bgSrc: 'assets/bg-level1.jpg', bgImg: null },
+    { name: 'LOCAL STADIUM',  threshold: 20, bgSrc: 'assets/bg-level2.jpg', bgImg: null },
+    { name: 'BIG STADIUM',    threshold: 40, bgSrc: 'assets/bg-level3.jpg', bgImg: null },
+    { name: 'WORLD CUP',      threshold: 60, bgSrc: 'assets/bg-level4.jpg', bgImg: null },
 ];
+
+// Preload level backgrounds
+LEVELS.forEach(lv => {
+    const img = new Image();
+    img.src = lv.bgSrc;
+    lv.bgImg = img;
+});
 
 let currentLevel = 0;
 let levelTransition = false;
@@ -266,7 +339,8 @@ function getLevel(s) {
 }
 
 // Game state
-let ball = { x: canvas.width / 2, y: canvas.height / 2, vy: 0, vx: 0, angle: 0, spin: 0 };
+const BALL_START_Y = CSS_H * 0.76; // Figma: ball at ~76% from top
+let ball = { x: CSS_W / 2, y: BALL_START_Y, vy: 0, vx: 0, angle: 0, spin: 0 };
 let score = 0;
 let highScore = parseInt(localStorage.getItem('keepballup_high') || '0');
 let state = 'start'; // 'start', 'playing', 'over', 'leveltransition'
@@ -275,9 +349,8 @@ let screenShake = 0;
 let canKick = true;        // only one kick per ball rise
 let wasGoingDown = false;  // track when ball starts falling
 
-// Hit zone (where you must tap)
+// Hit zone (rectangular)
 let zoneHeight = ZONE_HEIGHT_START;
-let zoneTop = GROUND_Y - zoneHeight;
 
 // 8-bit color palette
 const COLORS = {
@@ -300,26 +373,22 @@ const COLORS = {
 function resetGame() {
     score = 0;
     currentLevel = 0;
-    ball = { x: canvas.width / 2, y: GROUND_Y - BALL_SIZE - 50, vy: 0, vx: 0, angle: 0, spin: 0 };
+    ball = { x: CSS_W / 2, y: BALL_START_Y, vy: 0, vx: 0, angle: 0, spin: 0 };
     canKick = true;
     wasGoingDown = false;
-    updateZone();
+    zoneHeight = ZONE_HEIGHT_START;
     particles = [];
 }
 
-function getZoneBottom() {
-    return zoneTop + zoneHeight;
-}
-
 function ballInZone() {
-    return ball.y >= zoneTop - BALL_SIZE && ball.y <= getZoneBottom() + BALL_SIZE;
+    const zoneTop = ZONE_CENTER_Y - zoneHeight / 2;
+    const zoneBottom = ZONE_CENTER_Y + zoneHeight / 2;
+    return ball.y >= zoneTop && ball.y <= zoneBottom;
 }
 
 function updateZone() {
-    // Zone always anchored to ground, shrinks from top down
-    let progress = Math.min(score / ZONE_SHRINK_SCORE, 1); // 0 to 1
+    let progress = Math.min(score / ZONE_SHRINK_SCORE, 1);
     zoneHeight = ZONE_HEIGHT_START - (ZONE_HEIGHT_START - ZONE_HEIGHT_MIN) * progress;
-    zoneTop = GROUND_Y - zoneHeight;
 }
 
 // Draw an 8-bit style circle (pixelated)
@@ -337,9 +406,7 @@ function drawPixelCircle(cx, cy, r, color) {
 function drawText(text, x, y, size, color, align) {
     ctx.textAlign = align || 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = `bold ${size}px monospace`;
-    ctx.fillStyle = COLORS.textShadow;
-    ctx.fillText(text, x + 2, y + 2);
+    ctx.font = `${size}px 'Neue Pixel Grotesk', monospace`;
     ctx.fillStyle = color || COLORS.text;
     ctx.fillText(text, x, y);
 }
@@ -361,6 +428,7 @@ function spawnParticles(x, y) {
 function kick() {
     if (state === 'start') {
         state = 'playing';
+        splashPanel.classList.add('game-playing');
         resetGame();
         // First kick is free
         ball.vy = KICK_FORCE;
@@ -382,10 +450,7 @@ function kick() {
         if (!ballInZone()) {
             // Tapped outside zone — game over!
             state = 'over';
-            if (score > highScore) {
-                highScore = score;
-                localStorage.setItem('keepballup_high', highScore.toString());
-            }
+            showGameOver();
             return;
         }
 
@@ -407,13 +472,24 @@ function kick() {
     }
 
     if (state === 'over') {
-        state = 'start';
+        if (Date.now() - gameOverTime < GAME_OVER_COOLDOWN) return;
+        hideGameOver();
+        state = 'playing';
+        resetGame();
+        ball.vy = KICK_FORCE;
+        ball.vx = (Math.random() - 0.5) * 4;
+        ball.spin = ball.vx * 0.08;
+        score = 1;
+        canKick = false;
+        screenShake = 4;
+        spawnParticles(ball.x, ball.y);
+        return;
     }
 }
 
 document.addEventListener('keydown', function(e) {
     if (e.code === 'Space') {
-        if (overlay.style.display !== 'none') return;
+        if (!splashPanel.classList.contains('game-active')) return;
         e.preventDefault();
         kick();
     }
@@ -428,212 +504,42 @@ canvas.addEventListener('mousedown', function(e) {
     kick();
 });
 
-// Draw the hit zone
+// Draw the hit zone (full-width rectangle, shrinks to 4px line)
 function drawZone() {
-    let inZone = ballInZone();
-    let bottom = getZoneBottom();
+    const zoneTop = ZONE_CENTER_Y - zoneHeight / 2;
 
-    if (canKick) {
-        // Active zone
-        ctx.fillStyle = inZone ? COLORS.zoneActive : COLORS.zone;
-        ctx.fillRect(0, zoneTop, canvas.width, zoneHeight);
+    // Green fill — visible but not opaque
+    ctx.fillStyle = 'rgba(0, 255, 0, 0.12)';
+    ctx.fillRect(0, zoneTop, CSS_W, zoneHeight);
 
-        // Dashed pixel borders
-        ctx.fillStyle = COLORS.zoneBorder;
-        for (let x = 0; x < canvas.width; x += 8) {
-            ctx.fillRect(x, zoneTop, 4, 2);
-            ctx.fillRect(x, bottom - 2, 4, 2);
-        }
-        // Side markers
-        ctx.fillRect(0, zoneTop, 2, zoneHeight);
-        ctx.fillRect(canvas.width - 2, zoneTop, 2, zoneHeight);
-    } else {
-        // Locked zone (already kicked)
-        ctx.fillStyle = COLORS.zoneLocked;
-        ctx.fillRect(0, zoneTop, canvas.width, zoneHeight);
-
-        ctx.fillStyle = COLORS.zoneBorderLocked;
-        for (let x = 0; x < canvas.width; x += 8) {
-            ctx.fillRect(x, zoneTop, 4, 2);
-            ctx.fillRect(x, bottom - 2, 4, 2);
-        }
-    }
-}
-
-function drawGround() {
-    const lv = LEVELS[currentLevel];
-    ctx.fillStyle = lv.ground;
-    ctx.fillRect(0, GROUND_Y, canvas.width, canvas.height - GROUND_Y);
-    ctx.fillStyle = lv.groundDark;
-    for (let x = 0; x < canvas.width; x += 8) {
-        let h = (x * 7 + 3) % 5;
-        ctx.fillRect(x, GROUND_Y, 4, 2 + h);
-    }
-    ctx.fillStyle = lv.groundLine;
-    ctx.fillRect(0, GROUND_Y, canvas.width, 2);
-
-    // Field markings (white lines on grass)
-    ctx.fillStyle = 'rgba(255,255,255,0.15)';
-    ctx.fillRect(canvas.width / 2 - 1, GROUND_Y, 2, canvas.height - GROUND_Y);
-}
-
-// ── STADIUM BACKGROUNDS ──
-function drawTrainingField() {
-    // Simple: cones on the ground
-    ctx.fillStyle = '#ff6600';
-    for (let i = 0; i < 5; i++) {
-        const cx = 40 + i * 80;
-        // Small pixel cone
-        ctx.fillRect(cx, GROUND_Y - 8, 6, 8);
-        ctx.fillRect(cx - 2, GROUND_Y - 2, 10, 2);
-    }
-    // Simple fence in background
-    ctx.fillStyle = '#444444';
-    for (let x = 0; x < canvas.width; x += 20) {
-        ctx.fillRect(x + 9, GROUND_Y - 50, 2, 50);
-    }
-    ctx.fillStyle = '#555555';
-    ctx.fillRect(0, GROUND_Y - 50, canvas.width, 2);
-    ctx.fillRect(0, GROUND_Y - 30, canvas.width, 2);
-}
-
-function drawSmallStadium() {
-    const standY = GROUND_Y - 60;
-    const standH = 60;
-    // Left stand
-    ctx.fillStyle = '#2a2a3a';
-    ctx.fillRect(0, standY, 50, standH);
-    // Right stand
-    ctx.fillRect(canvas.width - 50, standY, 50, standH);
-
-    // Pixel crowd on stands
-    const crowdColors = ['#e94560', '#f9d71c', '#54a0ff', '#ff9ff3', '#ffffff', '#00d2d3'];
-    for (let side = 0; side < 2; side++) {
-        const baseX = side === 0 ? 4 : canvas.width - 46;
-        for (let row = 0; row < 6; row++) {
-            for (let col = 0; col < 5; col++) {
-                const px = baseX + col * 9;
-                const py = standY + 4 + row * 9;
-                // Head
-                ctx.fillStyle = '#ffcc99';
-                ctx.fillRect(px + 1, py, 4, 4);
-                // Shirt
-                ctx.fillStyle = crowdColors[(row * 5 + col + side * 3) % crowdColors.length];
-                ctx.fillRect(px, py + 4, 6, 4);
-            }
-        }
-    }
-
-    // Floodlights
-    ctx.fillStyle = '#666666';
-    ctx.fillRect(55, GROUND_Y - 120, 3, 120);
-    ctx.fillRect(canvas.width - 58, GROUND_Y - 120, 3, 120);
-    ctx.fillStyle = '#ffff99';
-    ctx.fillRect(50, GROUND_Y - 124, 12, 4);
-    ctx.fillRect(canvas.width - 62, GROUND_Y - 124, 12, 4);
-}
-
-function drawBigStadium() {
-    // Full stands behind the field
-    const standY = GROUND_Y - 100;
-
-    // Back wall
-    ctx.fillStyle = '#1a1a2e';
-    ctx.fillRect(0, standY - 40, canvas.width, 140);
-
-    // Upper tier
-    ctx.fillStyle = '#222236';
-    ctx.fillRect(0, standY - 40, canvas.width, 40);
-
-    // Lower tier
-    ctx.fillStyle = '#2a2a40';
-    ctx.fillRect(0, standY, canvas.width, 60);
-
-    // Crowd - dense pixel people
-    const crowdColors = ['#e94560', '#f9d71c', '#54a0ff', '#ff9ff3', '#ffffff', '#00d2d3', '#ff6b81', '#2ecc71'];
-    for (let tier = 0; tier < 2; tier++) {
-        const baseY = tier === 0 ? standY - 36 : standY + 4;
-        const rows = tier === 0 ? 4 : 6;
-        for (let row = 0; row < rows; row++) {
-            for (let col = 0; col < 40; col++) {
-                const px = 4 + col * 10;
-                const py = baseY + row * 9;
-                // Animate: some people stand up randomly
-                const bounce = Math.sin(Date.now() * 0.003 + col * 0.7 + row * 1.3) > 0.7 ? -2 : 0;
-                ctx.fillStyle = '#ffcc99';
-                ctx.fillRect(px + 1, py + bounce, 4, 3);
-                ctx.fillStyle = crowdColors[(row * 40 + col + tier * 7) % crowdColors.length];
-                ctx.fillRect(px, py + 3 + bounce, 6, 4);
-            }
-        }
-    }
-
-    // Floodlights
-    ctx.fillStyle = '#555555';
-    ctx.fillRect(20, standY - 100, 3, 100);
-    ctx.fillRect(canvas.width - 23, standY - 100, 3, 100);
-    ctx.fillStyle = '#ffff88';
-    ctx.fillRect(12, standY - 104, 18, 4);
-    ctx.fillRect(canvas.width - 30, standY - 104, 18, 4);
-
-    // Roof edge
-    ctx.fillStyle = '#333348';
-    ctx.fillRect(0, standY - 44, canvas.width, 4);
-}
-
-function drawWorldCup() {
-    drawBigStadium();
-
-    // Extra: banners and flags
-    const flagColors = ['#e94560', '#f9d71c', '#54a0ff', '#2ecc71', '#ff9ff3'];
-    for (let i = 0; i < 8; i++) {
-        const fx = 20 + i * 50;
-        const fy = GROUND_Y - 160;
-        // Pole
-        ctx.fillStyle = '#888888';
-        ctx.fillRect(fx, fy, 2, 20);
-        // Flag waving
-        const wave = Math.sin(Date.now() * 0.004 + i * 1.5) * 2;
-        ctx.fillStyle = flagColors[i % flagColors.length];
-        ctx.fillRect(fx + 2, fy + wave, 12, 8);
-    }
-
-    // "WORLD CUP" banner
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(canvas.width / 2 - 70, GROUND_Y - 150, 140, 16);
-    ctx.fillStyle = '#f9d71c';
-    ctx.font = 'bold 10px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('★ WORLD CUP ★', canvas.width / 2, GROUND_Y - 140);
-
-    // Confetti particles
-    const confettiColors = ['#e94560', '#f9d71c', '#54a0ff', '#2ecc71', '#ff9ff3'];
-    for (let i = 0; i < 15; i++) {
-        const cx = (Date.now() * 0.02 + i * 37) % canvas.width;
-        const cy = (Math.sin(Date.now() * 0.001 + i * 2.1) * 0.5 + 0.5) * (GROUND_Y - 180);
-        ctx.fillStyle = confettiColors[i % confettiColors.length];
-        ctx.fillRect(Math.round(cx), Math.round(cy), 3, 3);
-    }
+    // Bright neon green border lines (matching Figma)
+    ctx.strokeStyle = '#00ff00';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, zoneTop);
+    ctx.lineTo(CSS_W, zoneTop);
+    ctx.moveTo(0, zoneTop + zoneHeight);
+    ctx.lineTo(CSS_W, zoneTop + zoneHeight);
+    ctx.stroke();
 }
 
 function drawBackground() {
     const lv = LEVELS[currentLevel];
-    ctx.fillStyle = lv.bg;
-    ctx.fillRect(-5, -5, canvas.width + 10, canvas.height + 10);
+    const img = lv.bgImg;
 
-    if (currentLevel === 0) {
-        drawStars();
-        drawGround();
-        drawTrainingField();
-    } else if (currentLevel === 1) {
-        drawGround();
-        drawSmallStadium();
-    } else if (currentLevel === 2) {
-        drawGround();
-        drawBigStadium();
+    if (img && img.complete && img.naturalWidth > 0) {
+        // Draw Figma background scaled to cover the canvas (object-cover)
+        ctx.imageSmoothingEnabled = false;
+        const scale = Math.max(CSS_W / img.naturalWidth, CSS_H / img.naturalHeight);
+        const w = img.naturalWidth * scale;
+        const h = img.naturalHeight * scale;
+        const x = (CSS_W - w) / 2;
+        const y = (CSS_H - h) / 2;
+        ctx.drawImage(img, x, y, w, h);
     } else {
-        drawGround();
-        drawWorldCup();
+        // Fallback: solid black
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, CSS_W, CSS_H);
     }
 }
 
@@ -643,28 +549,28 @@ function drawLevelTransition() {
     const lv = LEVELS[currentLevel];
 
     ctx.fillStyle = '#0f0e17';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, CSS_W, CSS_H);
 
     const progress = levelTransTimer / LEVEL_TRANS_DURATION;
 
     // Flash effect
     if (levelTransTimer < 10) {
         ctx.fillStyle = `rgba(255,255,255,${0.5 - levelTransTimer * 0.05})`;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillRect(0, 0, CSS_W, CSS_H);
     }
 
     ctx.globalAlpha = Math.min(levelTransTimer / 15, 1);
 
-    drawText('NEXT LEVEL!', canvas.width / 2, canvas.height / 2 - 60, 32, '#f9d71c');
-    drawText(lv.name, canvas.width / 2, canvas.height / 2, 28, '#ffffff');
-    drawText('Score: ' + score, canvas.width / 2, canvas.height / 2 + 50, 20, '#00d2d3');
+    drawText('NEXT LEVEL!', CSS_W / 2, CSS_H / 2 - 60, 32, '#f9d71c');
+    drawText(lv.name, CSS_W / 2, CSS_H / 2, 28, '#ffffff');
+    drawText('Score: ' + score, CSS_W / 2, CSS_H / 2 + 50, 20, '#00d2d3');
 
     // Stars animation
     for (let i = 0; i < 5; i++) {
         const angle = (Date.now() * 0.002 + i * Math.PI * 2 / 5);
         const radius = 80 + Math.sin(Date.now() * 0.003) * 10;
-        const sx = canvas.width / 2 + Math.cos(angle) * radius;
-        const sy = canvas.height / 2 - 30 + Math.sin(angle) * radius;
+        const sx = CSS_W / 2 + Math.cos(angle) * radius;
+        const sy = CSS_H / 2 - 30 + Math.sin(angle) * radius;
         drawText('★', sx, sy, 16, '#f9d71c');
     }
 
@@ -688,7 +594,7 @@ const soccerBallImg = new Image();
 soccerBallImg.src = 'assets/soccer-ball.png';
 
 function drawBall() {
-    let shadowScale = 1 - (GROUND_Y - ball.y) / canvas.height;
+    let shadowScale = 1 - (GROUND_Y - ball.y) / CSS_H;
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.fillRect(ball.x - BALL_SIZE * shadowScale / 2, GROUND_Y + 4, BALL_SIZE * shadowScale, 4);
 
@@ -725,24 +631,6 @@ function drawParticles() {
     }
 }
 
-let stars = [];
-for (let i = 0; i < 40; i++) {
-    stars.push({
-        x: Math.random() * canvas.width,
-        y: Math.random() * (GROUND_Y - 20),
-        blink: Math.random() * 100
-    });
-}
-
-function drawStars() {
-    ctx.fillStyle = '#ffffff';
-    for (let s of stars) {
-        s.blink += 0.5;
-        if (Math.sin(s.blink * 0.05) > 0.3) {
-            ctx.fillRect(s.x, s.y, 2, 2);
-        }
-    }
-}
 
 // Main game loop
 function update() {
@@ -760,18 +648,7 @@ function update() {
     drawBackground();
 
     if (state === 'start') {
-        // Show zone preview
-        drawZone();
         drawBall();
-        drawText('Lv.0 TRAINING FIELD', 8, 16, 10, '#888888', 'left');
-        drawText('KEEP THE BALL UP', canvas.width / 2, 100, 24, COLORS.score);
-        drawText('Hit the ball in the', canvas.width / 2, 170, 14, COLORS.text);
-        drawText('ZONE only!', canvas.width / 2, 190, 18, COLORS.zoneBorder);
-        drawText('One tap per bounce', canvas.width / 2, 220, 14, COLORS.text);
-        drawText('SPACE / TAP to start', canvas.width / 2, 260, 16, COLORS.text);
-        if (highScore > 0) {
-            drawText('Best: ' + highScore, canvas.width / 2, 300, 20, COLORS.score);
-        }
     }
 
     if (state === 'playing') {
@@ -801,8 +678,8 @@ function update() {
             ball.vx = -ball.vx * 0.8;
             ball.spin = -ball.spin * 0.6 + ball.vy * 0.03;
         }
-        if (ball.x > canvas.width - BALL_SIZE) {
-            ball.x = canvas.width - BALL_SIZE;
+        if (ball.x > CSS_W - BALL_SIZE) {
+            ball.x = CSS_W - BALL_SIZE;
             ball.vx = -ball.vx * 0.8;
             ball.spin = -ball.spin * 0.6 - ball.vy * 0.03;
         }
@@ -814,13 +691,19 @@ function update() {
             ball.spin += ball.vx * 0.04;
         }
 
-        // Hit ground = game over
+        // Ball fell below zone = game over
+        const zoneBottom = ZONE_CENTER_Y + zoneHeight / 2;
+        if (ball.y > zoneBottom) {
+            state = 'over';
+            showGameOver();
+        }
+
+        // Clamp to ground
         if (ball.y >= GROUND_Y - BALL_SIZE) {
             ball.y = GROUND_Y - BALL_SIZE;
-            state = 'over';
-            if (score > highScore) {
-                highScore = score;
-                localStorage.setItem('keepballup_high', highScore.toString());
+            if (state !== 'over') {
+                state = 'over';
+                showGameOver();
             }
         }
 
@@ -829,11 +712,8 @@ function update() {
         updateParticles();
         drawParticles();
 
-        // Score
-        drawText(score.toString(), canvas.width / 2, 50, 48, COLORS.score);
-
-        // Level name top-left
-        drawText('Lv.' + currentLevel + ' ' + LEVELS[currentLevel].name, 8, 16, 10, '#888888', 'left');
+        // Score — bottom-left, 63px white
+        drawText(score.toString(), 20, CSS_H - 40, 63, '#ffffff', 'left');
 
         // Level-up banner (fades out during gameplay)
         if (levelTransTimer > 0) {
@@ -841,34 +721,16 @@ function update() {
             const alpha = Math.min(levelTransTimer / 30, 1);
             ctx.globalAlpha = alpha;
             ctx.fillStyle = 'rgba(0,0,0,0.6)';
-            ctx.fillRect(0, canvas.height / 2 - 40, canvas.width, 80);
-            drawText('NEXT LEVEL!', canvas.width / 2, canvas.height / 2 - 15, 28, '#f9d71c');
-            drawText(LEVELS[currentLevel].name, canvas.width / 2, canvas.height / 2 + 18, 20, '#ffffff');
+            ctx.fillRect(0, CSS_H / 2 - 40, CSS_W, 80);
+            drawText('NEXT LEVEL!', CSS_W / 2, CSS_H / 2 - 15, 28, '#f9d71c');
+            drawText(LEVELS[currentLevel].name, CSS_W / 2, CSS_H / 2 + 18, 20, '#ffffff');
             ctx.globalAlpha = 1;
-        }
-
-        // Kick status indicator
-        if (canKick && ballInZone()) {
-            drawText('HIT!', canvas.width / 2, 85, 14, COLORS.zoneBorder);
-        } else if (!canKick) {
-            drawText('WAIT...', canvas.width / 2, 85, 12, COLORS.zoneBorderLocked);
         }
     }
 
     if (state === 'over') {
-        drawZone();
+        // Just draw last frame — CSS filter handles desaturation
         drawBall();
-        drawParticles();
-        updateParticles();
-
-        drawText('GAME OVER', canvas.width / 2, 140, 36, COLORS.ball);
-        drawText('Score: ' + score, canvas.width / 2, 200, 28, COLORS.text);
-        if (score >= highScore && score > 0) {
-            drawText('NEW BEST!', canvas.width / 2, 240, 20, COLORS.score);
-        } else {
-            drawText('Best: ' + highScore, canvas.width / 2, 240, 20, COLORS.score);
-        }
-        drawText('TAP or SPACE to retry', canvas.width / 2, 310, 16, COLORS.text);
     }
 
     ctx.restore();
