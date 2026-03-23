@@ -1,6 +1,154 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
+// ── LOADING OVERLAY CONTROLLER ──
+const overlay = document.getElementById('loading-overlay');
+const progressFill = document.querySelector('.progress-fill');
+const loadingRow = document.querySelector('.loading-row');
+const splashPanel = document.querySelector('.splash-panel');
+const menuButtons = document.querySelectorAll('.menu-btn');
+const menuFooter = document.querySelector('.menu-footer');
+const btnPlay = document.querySelector('.btn-play');
+
+const ASSETS_TO_LOAD = [
+    'assets/patta-logo.png',
+    'assets/nike-swoosh.png',
+    'assets/pattern-tile.png',
+    'assets/tournament-title.png',
+];
+
+let loadedCount = 0;
+let loadingComplete = false;
+const LOAD_TIMEOUT = 10000; // 10 seconds
+
+function preloadAssets() {
+    const totalAssets = ASSETS_TO_LOAD.length;
+
+    const timeoutId = setTimeout(() => {
+        if (!loadingComplete) {
+            loadingComplete = true;
+            progressFill.style.width = '100%';
+            startPhase2();
+        }
+    }, LOAD_TIMEOUT);
+
+    ASSETS_TO_LOAD.forEach((src) => {
+        const img = new Image();
+        img.onload = img.onerror = () => {
+            loadedCount++;
+            const percent = (loadedCount / totalAssets) * 100;
+            progressFill.style.width = percent + '%';
+
+            if (loadedCount >= totalAssets && !loadingComplete) {
+                loadingComplete = true;
+                clearTimeout(timeoutId);
+                startPhase2();
+            }
+        };
+        img.src = src;
+    });
+}
+
+function startPhase2() {
+    // Pause 300ms at 100%, then converge
+    setTimeout(() => {
+        loadingRow.querySelector('.progress-bar').style.opacity = '0';
+
+        setTimeout(() => {
+            loadingRow.classList.add('converged');
+            // Wait for convergence transition to finish
+            loadingRow.addEventListener('transitionend', startPhase3, { once: true });
+            // Fallback if transitionend doesn't fire
+            phase3Timeout = setTimeout(startPhase3, 500);
+        }, 200); // bar fade duration
+    }, 300); // pause at 100%
+}
+
+let phase3Started = false;
+let phase3Timeout = null;
+function startPhase3() {
+    if (phase3Started) return;
+    phase3Started = true;
+    if (phase3Timeout) clearTimeout(phase3Timeout);
+
+    // Pause 200ms, then reveal splash
+    setTimeout(() => {
+        // Expand panel
+        splashPanel.classList.add('visible');
+        // Move logos to splash position
+        loadingRow.classList.add('splash-position');
+
+        // Wait for splash expand, then show menu
+        setTimeout(startPhase4, 500 + 1500); // 500ms expand + 1500ms hold
+    }, 200);
+}
+
+function startPhase4() {
+    menuButtons.forEach((btn, i) => {
+        setTimeout(() => {
+            btn.classList.add('visible');
+        }, i * 100);
+    });
+
+    // Footer after last button
+    setTimeout(() => {
+        menuFooter.classList.add('visible');
+    }, (menuButtons.length - 1) * 100 + 300 + 200);
+}
+
+// Skip to final menu state on tap/space during phases 1-3
+function skipToMenu() {
+    if (loadingComplete && menuButtons[0].classList.contains('visible')) return;
+
+    loadingComplete = true;
+    progressFill.style.width = '100%';
+    phase3Started = true;
+
+    // Instantly set all states
+    loadingRow.classList.add('converged', 'splash-position');
+    loadingRow.querySelector('.progress-bar').style.opacity = '0';
+    splashPanel.classList.add('visible');
+
+    // Show buttons immediately
+    menuButtons.forEach(btn => btn.classList.add('visible'));
+    menuFooter.classList.add('visible');
+}
+
+overlay.addEventListener('click', skipToMenu);
+document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' && overlay.style.display !== 'none') {
+        e.preventDefault();
+        skipToMenu();
+    }
+});
+
+function startGame() {
+    const hideOverlayAndStart = () => {
+        overlay.style.display = 'none';
+        update(); // Start the game loop
+    };
+
+    if (document.startViewTransition) {
+        document.startViewTransition(hideOverlayAndStart);
+    } else {
+        overlay.classList.add('hidden');
+        setTimeout(hideOverlayAndStart, 300);
+    }
+}
+
+btnPlay.addEventListener('click', (e) => {
+    e.stopPropagation(); // Don't trigger skipToMenu
+    startGame();
+});
+
+// Prevent other menu buttons from triggering skip
+document.querySelectorAll('.menu-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => e.stopPropagation());
+});
+
+// Start the loading sequence
+preloadAssets();
+
 // Game constants
 const GRAVITY = 0.3;
 const KICK_FORCE = -10;
