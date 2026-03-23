@@ -43,8 +43,7 @@ Assets are exported using the Figma MCP tools at implementation time — no manu
 - Container: 305px wide, 13px tall
 - Border: 1px solid white, small rounded corners (2px border-radius)
 - Fill: white rectangle, left-aligned inside container
-- Fill width: starts at 0%, updates proportionally per loaded asset
-- Controlled via CSS variable `--progress` (0 to 100)
+- Fill width: starts at 0%, updates proportionally per loaded asset via inline style
 
 ### Asset Loading
 - Preload via `new Image()`:
