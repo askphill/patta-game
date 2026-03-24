@@ -254,6 +254,8 @@ function startGame() {
     canvas.classList.add('active');
     // Cancel any existing game loop to prevent stacking
     if (rafId) cancelAnimationFrame(rafId);
+    // Reset frame timer to avoid dt spike
+    lastFrameTime = 0;
     // Draw first frame (background + ball) but don't start playing yet
     update();
 }
@@ -412,12 +414,13 @@ function ballInZone() {
     return ball.y >= zoneTop && ball.y <= zoneBottom;
 }
 
-function updateZone() {
+function updateZone(zoneDt) {
+    zoneDt = zoneDt || 1;
     let progress = DEBUG_HARD_MODE ? 1 : Math.min(score / ZONE_SHRINK_SCORE, 1);
     zoneHeight = ZONE_HEIGHT_START - (ZONE_HEIGHT_START - ZONE_HEIGHT_MIN) * progress;
 
     // Bob the zone up and down — amplitude scales with shrink progress
-    zoneBobPhase += DEBUG_HARD_MODE ? 0.06 : ZONE_BOB_SPEED;
+    zoneBobPhase += (DEBUG_HARD_MODE ? 0.06 : ZONE_BOB_SPEED) * zoneDt;
     const bobAmount = ZONE_BOB_AMPLITUDE * progress;
     ZONE_CENTER_Y = ZONE_CENTER_Y_BASE + Math.sin(zoneBobPhase) * bobAmount;
 }
@@ -632,10 +635,10 @@ const MARQUEE_H = 56;
 const MARQUEE_Y = CSS_H * 0.55 - 2;
 let marqueeX = 0;
 
-function drawMarquee() {
+function drawMarquee(marqueeDt) {
     if (!marqueeImg.complete) return;
     const imgW = (marqueeImg.width / marqueeImg.height) * MARQUEE_H;
-    marqueeX -= 1; // scroll speed
+    marqueeX -= 1 * marqueeDt; // scroll speed
     if (marqueeX <= -imgW) marqueeX += imgW;
     let x = marqueeX;
     while (x < CSS_W) {
@@ -668,12 +671,12 @@ function drawBall() {
     ctx.restore();
 }
 
-function updateParticles() {
+function updateParticles(pDt) {
     for (let i = particles.length - 1; i >= 0; i--) {
         let p = particles[i];
-        p.x += p.vx;
-        p.y += p.vy;
-        p.life--;
+        p.x += p.vx * pDt;
+        p.y += p.vy * pDt;
+        p.life -= pDt;
         if (p.life <= 0) particles.splice(i, 1);
     }
 }
@@ -689,12 +692,21 @@ function drawParticles() {
 
 // Main game loop
 let rafId = null;
-function update() {
+let lastFrameTime = 0;
+const TARGET_DT = 1000 / 60; // 16.67ms — physics tuned for 60fps
+function update(timestamp) {
+    if (!timestamp) timestamp = performance.now();
+    if (!lastFrameTime) lastFrameTime = timestamp;
+    const rawDt = timestamp - lastFrameTime;
+    lastFrameTime = timestamp;
+    // dt = how many 60fps frames worth of time elapsed (1.0 at 60fps, ~0.5 at 120fps)
+    const dt = Math.min(rawDt / TARGET_DT, 3); // cap at 3× to avoid spiral after tab-switch
+
     let shakeX = 0, shakeY = 0;
     if (screenShake > 0) {
         shakeX = (Math.random() - 0.5) * screenShake;
         shakeY = (Math.random() - 0.5) * screenShake;
-        screenShake *= 0.8;
+        screenShake *= Math.pow(0.8, dt);
         if (screenShake < 0.5) screenShake = 0;
     }
 
@@ -702,24 +714,27 @@ function update() {
     ctx.translate(shakeX, shakeY);
 
     drawBackground();
-    drawMarquee();
+    drawMarquee(dt);
 
     if (state === 'start') {
         drawBall();
     }
 
     if (state === 'playing') {
-        // Physics
-        ball.vy += GRAVITY;
+        // Physics (scaled by dt for frame-rate independence)
+        ball.vy += GRAVITY * dt;
         // Clamp velocity to prevent runaway speed
         ball.vy = Math.max(-18, Math.min(18, ball.vy));
         ball.vx = Math.max(-10, Math.min(10, ball.vx));
-        ball.y += ball.vy;
-        ball.x += ball.vx;
+        ball.y += ball.vy * dt;
+        ball.x += ball.vx * dt;
 
         // Spin physics: angular velocity with air friction
-        ball.angle += ball.spin;
-        ball.spin *= 0.997; // air drag on spin
+        ball.angle += ball.spin * dt;
+        ball.spin *= Math.pow(0.997, dt); // air drag on spin
+
+        // Update zone bob every frame
+        updateZone(dt);
 
         // Track ball direction: only re-enable kick after ball went UP then starts falling
         if (ball.vy < -2) {
@@ -773,7 +788,7 @@ function update() {
 
         drawZone();
         drawBall();
-        updateParticles();
+        updateParticles(dt);
         drawParticles();
 
         // Score — bottom-left, 63px white
@@ -781,7 +796,7 @@ function update() {
 
         // Level-up banner (fades out during gameplay)
         if (levelTransTimer > 0) {
-            levelTransTimer--;
+            levelTransTimer -= dt;
             const alpha = Math.min(levelTransTimer / 30, 1);
             ctx.globalAlpha = alpha;
             ctx.fillStyle = 'rgba(0,0,0,0.6)';
