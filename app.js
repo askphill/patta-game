@@ -1,6 +1,22 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
+// ── HAPTIC FEEDBACK ──
+let haptics = null;
+import('https://cdn.jsdelivr.net/npm/web-haptics/+esm').then(m => {
+    haptics = new m.WebHaptics();
+}).catch(() => {});
+
+function haptic(type, scoreIntensity) {
+    if (!haptics) return;
+    // Scale intensity with score: 0.3 at score 0, up to 1.0 at score 50+
+    const intensity = scoreIntensity
+        ? 0.3 + 0.7 * Math.min((scoreIntensity) / 50, 1)
+        : undefined;
+    const opts = intensity !== undefined ? { intensity } : undefined;
+    haptics.trigger(type, opts);
+}
+
 // ── RETINA / HiDPI SUPPORT ──
 const DPR = window.devicePixelRatio || 1;
 const CSS_W = 403;
@@ -39,6 +55,7 @@ const ASSETS_TO_LOAD = [
     'assets/bg-level4.jpg',
     'assets/key-space.png',
     'assets/btn-submit.png',
+    'assets/patta-nike-marquee.png',
 ];
 
 let loadedCount = 0;
@@ -235,6 +252,8 @@ function startGame() {
     // Show canvas + start overlay inside the panel, hide menu content
     splashPanel.classList.add('game-active');
     canvas.classList.add('active');
+    // Cancel any existing game loop to prevent stacking
+    if (rafId) cancelAnimationFrame(rafId);
     // Draw first frame (background + ball) but don't start playing yet
     update();
 }
@@ -300,8 +319,8 @@ if (sessionStorage.getItem('patta-loaded')) {
 }
 
 // Game constants
-const GRAVITY = 0.3;
-const KICK_FORCE = -10;
+const GRAVITY = 0.5;
+const KICK_FORCE = -12;
 const BALL_SIZE = 24;
 const GROUND_Y = CSS_H - 40;
 
@@ -450,6 +469,7 @@ function kick() {
         canKick = false;
         screenShake = 4;
         spawnParticles(ball.x, ball.y);
+        haptic('success', score);
         return;
     }
 
@@ -463,6 +483,7 @@ function kick() {
             // Tapped outside zone — game over!
             state = 'over';
             showGameOver();
+            haptic('error');
             return;
         }
 
@@ -472,6 +493,7 @@ function kick() {
         score++;
         screenShake = 4;
         spawnParticles(ball.x, ball.y);
+        haptic('success', score);
         updateZone();
 
         // Check for level up
@@ -479,6 +501,7 @@ function kick() {
         if (newLevel > currentLevel) {
             currentLevel = newLevel;
             levelTransTimer = LEVEL_TRANS_DURATION; // show banner
+            haptic([{ duration: 80, intensity: 1 }, { delay: 40, duration: 120, intensity: 1 }]);
         }
         return;
     }
@@ -601,6 +624,25 @@ function drawLevelTransition() {
     }
 }
 
+// Load marquee strip
+const marqueeImg = new Image();
+marqueeImg.src = 'assets/patta-nike-marquee.png';
+const MARQUEE_H = 56;
+const MARQUEE_Y = CSS_H * 0.55 - 2;
+let marqueeX = 0;
+
+function drawMarquee() {
+    if (!marqueeImg.complete) return;
+    const imgW = (marqueeImg.width / marqueeImg.height) * MARQUEE_H;
+    marqueeX -= 1; // scroll speed
+    if (marqueeX <= -imgW) marqueeX += imgW;
+    let x = marqueeX;
+    while (x < CSS_W) {
+        ctx.drawImage(marqueeImg, x, MARQUEE_Y, imgW, MARQUEE_H);
+        x += imgW;
+    }
+}
+
 // Load soccer ball from Figma asset
 const soccerBallImg = new Image();
 soccerBallImg.src = 'assets/soccer-ball.png';
@@ -645,6 +687,7 @@ function drawParticles() {
 
 
 // Main game loop
+let rafId = null;
 function update() {
     let shakeX = 0, shakeY = 0;
     if (screenShake > 0) {
@@ -658,6 +701,7 @@ function update() {
     ctx.translate(shakeX, shakeY);
 
     drawBackground();
+    drawMarquee();
 
     if (state === 'start') {
         drawBall();
@@ -666,6 +710,9 @@ function update() {
     if (state === 'playing') {
         // Physics
         ball.vy += GRAVITY;
+        // Clamp velocity to prevent runaway speed
+        ball.vy = Math.max(-18, Math.min(18, ball.vy));
+        ball.vx = Math.max(-10, Math.min(10, ball.vx));
         ball.y += ball.vy;
         ball.x += ball.vx;
 
@@ -689,11 +736,13 @@ function update() {
             ball.x = BALL_SIZE;
             ball.vx = -ball.vx * 0.8;
             ball.spin = -ball.spin * 0.6 + ball.vy * 0.03;
+            haptic('nudge');
         }
         if (ball.x > CSS_W - BALL_SIZE) {
             ball.x = CSS_W - BALL_SIZE;
             ball.vx = -ball.vx * 0.8;
             ball.spin = -ball.spin * 0.6 - ball.vy * 0.03;
+            haptic('nudge');
         }
 
         // Bounce off ceiling
@@ -701,6 +750,7 @@ function update() {
             ball.y = BALL_SIZE;
             ball.vy = Math.abs(ball.vy) * 0.5;
             ball.spin += ball.vx * 0.04;
+            haptic('nudge');
         }
 
         // Ball fell below zone = game over
@@ -708,6 +758,7 @@ function update() {
         if (ball.y > zoneBottom) {
             state = 'over';
             showGameOver();
+            haptic('error');
         }
 
         // Clamp to ground
@@ -746,7 +797,7 @@ function update() {
     }
 
     ctx.restore();
-    requestAnimationFrame(update);
+    rafId = requestAnimationFrame(update);
 }
 
 // Game loop is started by the loading overlay when "Play Game" is clicked

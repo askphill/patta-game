@@ -136,7 +136,7 @@ canvas.active {
 }
 
 .logo {
-    transition: width 0.5s var(--ease-out-quart), height 0.5s var(--ease-out-quart), transform 0.5s var(--ease-out-quart);
+    transition: width 0.5s var(--ease-out-quart), height 0.5s var(--ease-out-quart), transform 0.5s var(--ease-out-quart), opacity 0.5s var(--ease-out-quart);
 }
 
 .logo-patta {
@@ -194,6 +194,10 @@ canvas.active {
 
 .loading-row.converged {
     gap: 19px;
+}
+
+.loading-row.converged .logo {
+    opacity: 0;
 }
 
 /* Phase 3: Splash panel */
@@ -392,12 +396,14 @@ canvas.active {
     width: 125px;
     height: 76px;
     transform: translateX(calc(-18vw - 138px));
+    opacity: 1;
 }
 
 .loading-row.splash-position .logo-nike {
     width: 113px;
     height: 46px;
     transform: translateX(calc(18vw + 122px));
+    opacity: 1;
 }
 
 @media (max-width: 500px) {
@@ -505,6 +511,56 @@ canvas.active {
 #loading-overlay.skip-intro .logo-nike {
     width: 113px !important;
     height: 46px !important;
+}
+
+/* ── ROTATE SCREEN (mobile landscape) ── */
+#rotate-screen {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: #000;
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+    #rotate-screen {
+        display: flex;
+    }
+}
+
+.rotate-content {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: 65vw;
+    max-width: 553px;
+}
+
+.rotate-logo {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+}
+
+.rotate-logo--patta {
+    width: 65px;
+    height: 39px;
+}
+
+.rotate-logo--nike {
+    width: 60px;
+    height: 25px;
+}
+
+.rotate-text {
+    font-family: 'Neue Pixel Grotesk', monospace;
+    font-size: 20px;
+    color: #fff;
+    text-align: center;
+    text-transform: uppercase;
+    line-height: 1.3;
 }
 
 /* View Transitions API (reserved for future use) */
