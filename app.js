@@ -23,8 +23,8 @@ const CSS_W = 403;
 const CSS_H = 698;
 canvas.width = CSS_W * DPR;
 canvas.height = CSS_H * DPR;
-canvas.style.width = CSS_W + 'px';
-canvas.style.height = CSS_H + 'px';
+canvas.style.width = '100%';
+canvas.style.height = '100%';
 ctx.scale(DPR, DPR);
 
 // ── LOADING OVERLAY CONTROLLER ──
@@ -327,10 +327,10 @@ const GROUND_Y = CSS_H - 40;
 // Hit zone: full-width rectangle, shrinks in height toward a 6px line
 const DEBUG_HARD_MODE = false;   // SET TO true TO TEST ENDGAME DIFFICULTY
 const ZONE_CENTER_Y_BASE = CSS_H * 0.455;
-const ZONE_HEIGHT_START = DEBUG_HARD_MODE ? 6 : 550;
-const ZONE_HEIGHT_MIN = 6;       // shrinks to a thin line
+const ZONE_HEIGHT_START = DEBUG_HARD_MODE ? 10 : 550;
+const ZONE_HEIGHT_MIN = 10;       // shrinks to a thin line
 const ZONE_SHRINK_SCORE = 50;
-const ZONE_BOB_AMPLITUDE = 40;   // max vertical bob in px at smallest zone
+const ZONE_BOB_AMPLITUDE = 60;   // max vertical bob in px at smallest zone
 const ZONE_BOB_SPEED = 0.02;     // oscillation speed (radians per frame)
 let zoneBobPhase = 0;
 let ZONE_CENTER_Y = ZONE_CENTER_Y_BASE;
@@ -417,7 +417,7 @@ function updateZone() {
     zoneHeight = ZONE_HEIGHT_START - (ZONE_HEIGHT_START - ZONE_HEIGHT_MIN) * progress;
 
     // Bob the zone up and down — amplitude scales with shrink progress
-    zoneBobPhase += ZONE_BOB_SPEED;
+    zoneBobPhase += DEBUG_HARD_MODE ? 0.06 : ZONE_BOB_SPEED;
     const bobAmount = ZONE_BOB_AMPLITUDE * progress;
     ZONE_CENTER_Y = ZONE_CENTER_Y_BASE + Math.sin(zoneBobPhase) * bobAmount;
 }
@@ -461,7 +461,8 @@ function kick() {
         state = 'playing';
         splashPanel.classList.add('game-playing');
         resetGame();
-        // First kick is free
+        // First kick is free — in hard mode start ball at zone center
+        if (DEBUG_HARD_MODE) ball.y = ZONE_CENTER_Y_BASE;
         ball.vy = KICK_FORCE;
         ball.vx = (Math.random() - 0.5) * 4;
         ball.spin = ball.vx * 0.08;

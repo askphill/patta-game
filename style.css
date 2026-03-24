@@ -410,12 +410,14 @@ canvas.active {
     .loading-row.splash-position .logo-patta {
         width: 65px;
         height: 39px;
-        transform: translateX(calc(-35vw + 10px));
+        transform: translateX(calc(-50vw - 65px));
+        opacity: 0;
     }
     .loading-row.splash-position .logo-nike {
         width: 60px;
         height: 25px;
-        transform: translateX(calc(35vw - 10px));
+        transform: translateX(calc(50vw + 60px));
+        opacity: 0;
     }
 }
 
