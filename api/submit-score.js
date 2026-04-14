@@ -40,12 +40,10 @@ export default async function handler(req, res) {
   // 6. Store/update player data
   await redis.hset(`player:${emailLower}`, { name: name.trim(), email: emailLower, score });
 
-  // 7. Klaviyo call (must await — serverless functions terminate after response)
-  try {
-    await subscribeToKlaviyo(emailLower, name.trim(), score);
-  } catch (err) {
+  // 7. Klaviyo call (fire-and-forget, don't block response)
+  const klaviyoPromise = subscribeToKlaviyo(emailLower, name.trim(), score).catch((err) => {
     console.error('[Klaviyo] Error:', err.message || err);
-  }
+  });
 
   // 8. Get fresh leaderboard + user rank
   const [topTen, userRank] = await Promise.all([
@@ -56,11 +54,15 @@ export default async function handler(req, res) {
   const rank = userRank !== null ? userRank + 1 : null;
 
   // 9. Return response
-  return res.status(200).json({
+  // Send response immediately, let Klaviyo finish in background
+  res.status(200).json({
     rank,
     topTen,
     userEntry: { rank, name: name.trim(), score },
   });
+
+  // Wait for Klaviyo to finish before function terminates
+  await klaviyoPromise;
 }
 
 async function validateSession(sessionId) {

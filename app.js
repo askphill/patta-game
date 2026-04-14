@@ -598,9 +598,9 @@ const GROUND_Y = CSS_H - 40;
 // Hit zone: full-width rectangle, shrinks in height toward a 6px line
 const DEBUG_HARD_MODE = false; // SET TO true TO TEST ENDGAME DIFFICULTY
 const ZONE_CENTER_Y_BASE = CSS_H * 0.455;
-const ZONE_HEIGHT_START = DEBUG_HARD_MODE ? 10 : 550;
-const ZONE_HEIGHT_MIN = 16;
-const ZONE_SHRINK_SCORE = 80;
+const ZONE_HEIGHT_START = DEBUG_HARD_MODE ? 10 : 400;
+const ZONE_HEIGHT_MIN = 24;
+const ZONE_SHRINK_SCORE = 100;
 const ZONE_BOB_AMPLITUDE = 60; // max vertical bob in px at smallest zone
 const ZONE_BOB_SPEED_BASE = 0.02; // base oscillation speed (same as original)
 const ZONE_BOB_SPEED_PER_LEVEL = 0.003; // gentle increase per level
@@ -710,8 +710,9 @@ function updateZone(zoneDt) {
   zoneHeight =
     ZONE_HEIGHT_START - (ZONE_HEIGHT_START - ZONE_HEIGHT_MIN) * progress;
 
-  // Bob the zone up and down — speed increases per level, amplitude scales with shrink
-  var bobSpeed = DEBUG_HARD_MODE ? 0.06 : ZONE_BOB_SPEED_BASE + (currentLevel * ZONE_BOB_SPEED_PER_LEVEL);
+  // Bob the zone — speed increases per level + gradual creep after score 80
+  var extraSpeed = score > 60 ? (score - 60) * 0.0003 : 0;
+  var bobSpeed = DEBUG_HARD_MODE ? 0.06 : ZONE_BOB_SPEED_BASE + (currentLevel * ZONE_BOB_SPEED_PER_LEVEL) + extraSpeed;
   zoneBobPhase += bobSpeed * zoneDt;
   const bobAmount = ZONE_BOB_AMPLITUDE * progress;
   ZONE_CENTER_Y = ZONE_CENTER_Y_BASE + Math.sin(zoneBobPhase) * bobAmount;
@@ -1061,12 +1062,14 @@ function update(timestamp) {
       haptic("nudge");
     }
 
-    // Ball fell below zone = game over
-    const zoneBottom = ZONE_CENTER_Y + zoneHeight / 2;
-    if (ball.y > zoneBottom) {
-      state = "over";
-      showGameOver();
-      haptic("error");
+    // Ball fell below zone = game over (grace period for first 2 kicks)
+    if (score > 2) {
+      const zoneBottom = ZONE_CENTER_Y + zoneHeight / 2;
+      if (ball.y > zoneBottom) {
+        state = "over";
+        showGameOver();
+        haptic("error");
+      }
     }
 
     // Clamp to ground
@@ -1079,14 +1082,8 @@ function update(timestamp) {
     }
 
     drawZone();
-    drawBall();
-    updateParticles(dt);
-    drawParticles();
 
-    // Score — bottom-left, 63px white
-    drawText(score.toString(), 20, CSS_H - 40, 63, "#ffffff", "left");
-
-    // Level-up banner (fades out during gameplay, drawn on top of everything)
+    // Level-up banner (drawn behind ball and particles)
     if (levelTransTimer > 0) {
       levelTransTimer -= dt;
       if (levelTransTimer > 0) {
@@ -1105,6 +1102,13 @@ function update(timestamp) {
         ctx.globalAlpha = 1;
       }
     }
+
+    drawBall();
+    updateParticles(dt);
+    drawParticles();
+
+    // Score — bottom-left, 63px white
+    drawText(score.toString(), 20, CSS_H - 40, 63, "#ffffff", "left");
   }
 
   if (state === "over") {
