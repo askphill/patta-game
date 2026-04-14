@@ -8,22 +8,22 @@ export default async function handler(req, res) {
 
   const { name, email, score, sessionId, turnstileToken } = req.body;
 
-  // 1. Validate session
-  const sessionError = await validateSession(sessionId);
-  if (sessionError) {
-    return res.status(403).json({ error: sessionError });
-  }
-
-  // 2. Verify Turnstile token
+  // 1. Verify Turnstile token (before session, so session isn't consumed on failure)
   const turnstileError = await verifyTurnstile(turnstileToken);
   if (turnstileError) {
     return res.status(403).json({ error: turnstileError });
   }
 
-  // 3. Validate inputs
+  // 2. Validate inputs
   const inputError = validateInputs(name, email, score);
   if (inputError) {
     return res.status(400).json({ error: inputError });
+  }
+
+  // 3. Validate session (marks session as used)
+  const sessionError = await validateSession(sessionId);
+  if (sessionError) {
+    return res.status(403).json({ error: sessionError });
   }
 
   const emailLower = email.toLowerCase().trim();
@@ -40,8 +40,12 @@ export default async function handler(req, res) {
   // 6. Store/update player data
   await redis.hset(`player:${emailLower}`, { name: name.trim(), email: emailLower, score });
 
-  // 7. Fire-and-forget Klaviyo call
-  subscribeToKlaviyo(emailLower, name.trim(), score).catch(() => {});
+  // 7. Klaviyo call (must await — serverless functions terminate after response)
+  try {
+    await subscribeToKlaviyo(emailLower, name.trim(), score);
+  } catch (err) {
+    console.error('[Klaviyo] Error:', err.message || err);
+  }
 
   // 8. Get fresh leaderboard + user rank
   const [topTen, userRank] = await Promise.all([
@@ -92,7 +96,7 @@ async function verifyTurnstile(token) {
 function validateInputs(name, email, score) {
   if (!name || typeof name !== 'string') return 'Name is required';
   if (name.trim().length === 0 || name.trim().length > 16) return 'Name must be 1-16 characters';
-  if (!/^[a-zA-Z0-9_ -]+$/.test(name.trim())) return 'Name contains invalid characters';
+  if (!/^[a-zA-Z0-9_@. -]+$/.test(name.trim())) return 'Name contains invalid characters';
   if (/https?:|www\.|\.com|\.net|\.org|\.io/i.test(name)) return 'URLs not allowed in name';
 
   if (!email || typeof email !== 'string') return 'Email is required';
@@ -119,9 +123,12 @@ async function checkRateLimit(email) {
 async function subscribeToKlaviyo(email, name, score) {
   const apiKey = process.env.KLAVIYO_API_KEY;
   const listId = process.env.KLAVIYO_LIST_ID;
-  if (!apiKey || !listId) return;
+  if (!apiKey || !listId) {
+    console.log('[Klaviyo] Missing env vars — apiKey:', !!apiKey, 'listId:', !!listId);
+    return;
+  }
 
-  await fetch('https://a.klaviyo.com/api/profile-subscription-bulk-create-jobs/', {
+  const res = await fetch('https://a.klaviyo.com/api/profile-subscription-bulk-create-jobs/', {
     method: 'POST',
     headers: {
       'Authorization': `Klaviyo-API-Key ${apiKey}`,
@@ -137,9 +144,12 @@ async function subscribeToKlaviyo(email, name, score) {
               type: 'profile',
               attributes: {
                 email,
-                properties: {
-                  patta_game_username: name,
-                  patta_game_score: score,
+                subscriptions: {
+                  email: {
+                    marketing: {
+                      consent: 'SUBSCRIBED',
+                    },
+                  },
                 },
               },
             }],
@@ -154,4 +164,32 @@ async function subscribeToKlaviyo(email, name, score) {
       },
     }),
   });
+
+  const body = await res.text();
+  console.log('[Klaviyo] Subscribe status:', res.status, 'Response:', body);
+
+  // Update profile with custom properties (separate API call)
+  const profileRes = await fetch('https://a.klaviyo.com/api/profile-import/', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Klaviyo-API-Key ${apiKey}`,
+      'Content-Type': 'application/json',
+      'revision': '2024-10-15',
+    },
+    body: JSON.stringify({
+      data: {
+        type: 'profile',
+        attributes: {
+          email,
+          properties: {
+            patta_game_username: name,
+            patta_game_score: score,
+          },
+        },
+      },
+    }),
+  });
+
+  const profileBody = await profileRes.text();
+  console.log('[Klaviyo] Profile update status:', profileRes.status, 'Response:', profileBody);
 }

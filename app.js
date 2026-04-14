@@ -52,6 +52,7 @@ const scoreSubmitError = document.querySelector(".score-submit-error");
 const btnContinue = document.querySelector(".btn-continue");
 const leaderboardOverlay = document.querySelector(".leaderboard-overlay");
 const leaderboardRows = document.querySelector(".leaderboard-rows");
+const leaderboardGradient = document.querySelector(".leaderboard-gradient");
 const btnBack = document.querySelector(".btn-back");
 const btnLeaderboard = document.querySelector(".btn-leaderboard");
 
@@ -97,6 +98,14 @@ scoreSubmitForm.addEventListener("submit", async (e) => {
   scoreSubmitError.textContent = "";
   btnContinue.disabled = true;
 
+  // Wait for Turnstile token if not ready yet (max 5 seconds)
+  if (!turnstileToken && window.turnstile) {
+    for (var i = 0; i < 25; i++) {
+      await new Promise(function(r) { setTimeout(r, 200); });
+      if (turnstileToken) break;
+    }
+  }
+
   const formData = new FormData(scoreSubmitForm);
   const name = (formData.get("name") || "").trim();
   const email = (formData.get("email") || "").trim();
@@ -140,6 +149,10 @@ scoreSubmitForm.addEventListener("submit", async (e) => {
       return;
     }
 
+    // Store user entry and invalidate leaderboard cache
+    localStorage.setItem("patta_game_entry", JSON.stringify(data.userEntry));
+    leaderboardLoaded = false;
+
     // Show leaderboard with user highlight
     showLeaderboard(data.topTen, data.userEntry);
   } catch (err) {
@@ -157,51 +170,67 @@ function showLeaderboard(topTen, userEntry) {
   );
   canvas.classList.remove("active");
   splashPanel.classList.add("leaderboard-active");
+  overlay.classList.add("leaderboard-bg-active");
   renderLeaderboard(topTen, userEntry);
 }
 
-function renderLeaderboard(topTen, userEntry) {
-  leaderboardRows.innerHTML = "";
+function getTrophySvg(rank) {
+  var colors = { 1: '#FDDB05', 2: '#C0C0C0', 3: '#CD7F32' };
+  var fill = colors[rank];
+  if (!fill) return '';
+  return '<div class="lb-cell lb-cell-trophy"><svg width="17" height="16" viewBox="0 0 17.4167 15.8333" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M13.4583 1.58333V0H3.95833V1.58333H0V5.54167H0.791667V7.125H1.58333V7.91667H2.375V8.70833H3.16667V9.5H3.95833V10.2917H6.33333V11.0833H7.91667V13.4583H4.75V15.8333H12.6667V13.4583H9.5V11.0833H11.0833V10.2917H13.4583V9.5H14.25V8.70833H15.0417V7.91667H15.8333V7.125H16.625V5.54167H17.4167V1.58333H13.4583ZM5.54167 8.70833H3.95833V7.91667H3.16667V7.125H2.375V5.54167H1.58333V3.16667H3.16667V3.95833H3.95833V5.54167H4.75V7.91667H5.54167V8.70833ZM5.54167 5.54167V1.58333H11.875V5.54167H11.0833V7.91667H10.2917V9.5H7.125V7.91667H6.33333V5.54167H5.54167ZM15.0417 5.54167V7.125H14.25V7.91667H13.4583V8.70833H11.875V7.91667H12.6667V6.33333H13.4583V3.95833H14.25V3.16667H15.8333V5.54167H15.0417Z" fill="' + fill + '"/></svg></div>';
+}
 
-  topTen.forEach((entry) => {
-    const row = document.createElement("div");
+function buildRowHtml(entry, isUserRow) {
+  var trophy = getTrophySvg(entry.rank);
+  var arrowSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="11" viewBox="0 0 12 11" fill="none" style="transform:scaleX(-1)"><path d="M6.53711 3.27094H7.62793V6.54144H6.53711V8.72211H4.35742V7.63226H3.26953V2.18011H4.35742V1.09027H6.53711V3.27094ZM3.2666 6.54144H2.17676V5.4516H1.08594V4.36078H2.17676V3.27094H3.2666V6.54144ZM9.80859 6.54144H7.62891V3.27094H9.80859V6.54144ZM10.8994 6.54144H9.80957V3.27094H10.8994V6.54144Z" fill="white"/></svg>';
+  var rankDisplay = (isUserRow && entry.rank > 10) ? arrowSvg : entry.rank;
+  return '<div class="lb-cell lb-cell-rank">' + rankDisplay + '</div>' +
+    '<div class="lb-cell lb-cell-name"><span class="lb-name-text">' + escapeHtml(entry.name) + '</span></div>' +
+    trophy +
+    '<div class="lb-cell lb-cell-score">' + entry.score + '</div>';
+}
+
+const leaderboardHeader = '<div class="leaderboard-table-header"><span class="lb-header-rank">#</span><span class="lb-header-name">Name</span><span class="lb-header-score">Score</span></div>';
+
+function updateLeaderboardGradient() {
+  var el = leaderboardOverlay;
+  var canScroll = el.scrollHeight > el.clientHeight;
+  var atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 5;
+  leaderboardGradient.style.opacity = (canScroll && !atBottom) ? '1' : '0';
+}
+
+leaderboardGradient.style.opacity = '0'; // hidden by default
+leaderboardOverlay.addEventListener('scroll', updateLeaderboardGradient);
+
+function renderLeaderboard(topTen, userEntry) {
+  leaderboardRows.innerHTML = leaderboardHeader;
+
+  topTen.forEach(function(entry) {
+    var row = document.createElement("div");
     row.className = "leaderboard-row";
-    if (userEntry && entry.rank === userEntry.rank) {
+    var isUser = userEntry && entry.rank === userEntry.rank;
+    if (isUser) {
       row.classList.add("user-row");
     }
-    row.innerHTML =
-      '<span class="lb-col-rank">' +
-      entry.rank +
-      "</span>" +
-      '<span class="lb-col-name">' +
-      escapeHtml(entry.name) +
-      "</span>" +
-      '<span class="lb-col-score">' +
-      entry.score +
-      "</span>";
+    row.innerHTML = buildRowHtml(entry, isUser);
     leaderboardRows.appendChild(row);
   });
 
   // If user is outside top 10, add separator + user row
   if (userEntry && userEntry.rank > topTen.length) {
-    const sep = document.createElement("div");
+    var sep = document.createElement("div");
     sep.className = "leaderboard-row separator-row";
     leaderboardRows.appendChild(sep);
 
-    const userRow = document.createElement("div");
+    var userRow = document.createElement("div");
     userRow.className = "leaderboard-row user-row";
-    userRow.innerHTML =
-      '<span class="lb-col-rank">' +
-      userEntry.rank +
-      "</span>" +
-      '<span class="lb-col-name">' +
-      escapeHtml(userEntry.name) +
-      "</span>" +
-      '<span class="lb-col-score">' +
-      userEntry.score +
-      "</span>";
+    userRow.innerHTML = buildRowHtml(userEntry, true);
     leaderboardRows.appendChild(userRow);
   }
+
+  // Check if gradient should show after render (short delay to avoid jump)
+  setTimeout(updateLeaderboardGradient, 300);
 }
 
 function escapeHtml(str) {
@@ -426,24 +455,22 @@ function hideGameOver() {
   splashPanel.classList.remove("game-over");
 }
 
-function initTurnstile() {
-  if (window.turnstile && !turnstileWidgetId) {
-    turnstileWidgetId = turnstile.render('#turnstile-container', {
-      sitekey: TURNSTILE_SITE_KEY,
-      callback: function(token) {
-        turnstileToken = token;
-      },
-      'error-callback': function() {
-        turnstileToken = null;
-      },
-      size: 'invisible',
-    });
-  }
-}
+// Turnstile calls this global callback when the script finishes loading
+window.onTurnstileLoad = function() {
+  turnstileWidgetId = turnstile.render('#turnstile-container', {
+    sitekey: TURNSTILE_SITE_KEY,
+    callback: function(token) {
+      turnstileToken = token;
+    },
+    'error-callback': function() {
+      turnstileToken = null;
+    },
+    size: 'invisible',
+  });
+};
 
 function startGame() {
   startSession();
-  initTurnstile();
   // Show canvas + start overlay inside the panel, hide menu content
   splashPanel.classList.add("game-active");
   canvas.classList.add("active");
@@ -473,8 +500,9 @@ btnSubmitScore.addEventListener("click", (e) => {
 
 function backToMenu() {
   hideGameOver();
-  splashPanel.classList.remove("game-active", "game-playing");
+  splashPanel.classList.remove("game-active", "game-playing", "score-submit-active", "leaderboard-active");
   canvas.classList.remove("active");
+  overlay.classList.remove("leaderboard-bg-active");
   state = "start";
   resetGame();
 }
@@ -482,21 +510,43 @@ function backToMenu() {
 // Back button → return to menu
 btnBack.addEventListener("click", (e) => {
   e.stopPropagation();
+  leaderboardGradient.style.opacity = '0';
   splashPanel.classList.remove("leaderboard-active");
+  overlay.classList.remove("leaderboard-bg-active");
   state = "start";
   resetGame();
 });
 
 // Menu leaderboard button → fetch and show leaderboard (no user highlight)
+var leaderboardLoaded = false;
+
 btnLeaderboard.addEventListener("click", async (e) => {
   e.stopPropagation();
+  leaderboardGradient.style.opacity = '0';
+  splashPanel.classList.add("leaderboard-active");
+  overlay.classList.add("leaderboard-bg-active");
+  leaderboardOverlay.scrollTop = 0;
+
+  // Don't re-fetch if already loaded
+  if (leaderboardLoaded) {
+    setTimeout(updateLeaderboardGradient, 300);
+    return;
+  }
+
+  leaderboardRows.innerHTML = leaderboardHeader + '<div class="leaderboard-loading">LOADING...</div>';
+
+  var storedEntry = null;
+  try {
+    storedEntry = JSON.parse(localStorage.getItem("patta_game_entry"));
+  } catch (e) {}
+
   try {
     const res = await fetch("/api/leaderboard");
     const data = await res.json();
-    splashPanel.classList.add("leaderboard-active");
-    renderLeaderboard(data.topTen, null);
+    renderLeaderboard(data.topTen, storedEntry);
+    leaderboardLoaded = true;
   } catch (err) {
-    // Silently fail — button just doesn't work if API is down
+    leaderboardRows.innerHTML = leaderboardHeader + '<div class="leaderboard-loading">FAILED TO LOAD</div>';
   }
 });
 
@@ -549,10 +599,11 @@ const GROUND_Y = CSS_H - 40;
 const DEBUG_HARD_MODE = false; // SET TO true TO TEST ENDGAME DIFFICULTY
 const ZONE_CENTER_Y_BASE = CSS_H * 0.455;
 const ZONE_HEIGHT_START = DEBUG_HARD_MODE ? 10 : 550;
-const ZONE_HEIGHT_MIN = 10; // shrinks to a thin line
-const ZONE_SHRINK_SCORE = 50;
+const ZONE_HEIGHT_MIN = 16;
+const ZONE_SHRINK_SCORE = 80;
 const ZONE_BOB_AMPLITUDE = 60; // max vertical bob in px at smallest zone
-const ZONE_BOB_SPEED = 0.02; // oscillation speed (radians per frame)
+const ZONE_BOB_SPEED_BASE = 0.02; // base oscillation speed (same as original)
+const ZONE_BOB_SPEED_PER_LEVEL = 0.003; // gentle increase per level
 let zoneBobPhase = 0;
 let ZONE_CENTER_Y = ZONE_CENTER_Y_BASE;
 
@@ -659,8 +710,9 @@ function updateZone(zoneDt) {
   zoneHeight =
     ZONE_HEIGHT_START - (ZONE_HEIGHT_START - ZONE_HEIGHT_MIN) * progress;
 
-  // Bob the zone up and down — amplitude scales with shrink progress
-  zoneBobPhase += (DEBUG_HARD_MODE ? 0.06 : ZONE_BOB_SPEED) * zoneDt;
+  // Bob the zone up and down — speed increases per level, amplitude scales with shrink
+  var bobSpeed = DEBUG_HARD_MODE ? 0.06 : ZONE_BOB_SPEED_BASE + (currentLevel * ZONE_BOB_SPEED_PER_LEVEL);
+  zoneBobPhase += bobSpeed * zoneDt;
   const bobAmount = ZONE_BOB_AMPLITUDE * progress;
   ZONE_CENTER_Y = ZONE_CENTER_Y_BASE + Math.sin(zoneBobPhase) * bobAmount;
 }
@@ -1034,22 +1086,24 @@ function update(timestamp) {
     // Score — bottom-left, 63px white
     drawText(score.toString(), 20, CSS_H - 40, 63, "#ffffff", "left");
 
-    // Level-up banner (fades out during gameplay)
+    // Level-up banner (fades out during gameplay, drawn on top of everything)
     if (levelTransTimer > 0) {
       levelTransTimer -= dt;
-      const alpha = Math.min(levelTransTimer / 30, 1);
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = "rgba(0,0,0,0.6)";
-      ctx.fillRect(0, CSS_H / 2 - 40, CSS_W, 80);
-      drawText("NEXT LEVEL!", CSS_W / 2, CSS_H / 2 - 15, 28, "#f9d71c");
-      drawText(
-        LEVELS[currentLevel].name,
-        CSS_W / 2,
-        CSS_H / 2 + 18,
-        20,
-        "#ffffff",
-      );
-      ctx.globalAlpha = 1;
+      if (levelTransTimer > 0) {
+        const alpha = Math.min(levelTransTimer / 30, 1);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = "rgba(0,0,0,0.8)";
+        ctx.fillRect(0, CSS_H / 2 - 60, CSS_W, 120);
+        drawText("NEXT LEVEL!", CSS_W / 2, CSS_H / 2 - 15, 28, "#f9d71c");
+        drawText(
+          LEVELS[currentLevel].name,
+          CSS_W / 2,
+          CSS_H / 2 + 18,
+          20,
+          "#ffffff",
+        );
+        ctx.globalAlpha = 1;
+      }
     }
   }
 
