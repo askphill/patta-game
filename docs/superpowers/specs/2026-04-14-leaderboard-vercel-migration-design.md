@@ -10,14 +10,15 @@ Migrate the Patta x Nike Soccer Tournament game from Cloudflare to Vercel hostin
 
 ### Hosting: Vercel
 
-Static files (index.html, app.js, style.css, assets/) served directly by Vercel. Two serverless functions handle the backend logic. No framework migration — the existing vanilla JS stays as-is.
+Static files (index.html, app.js, style.css, assets/) served directly by Vercel. Three serverless functions handle the backend logic. No framework migration — the existing vanilla JS stays as-is.
 
 ### Project Structure
 
 ```
 /patta-game-concept/
 ├── api/
-│   ├── submit-score.js    — POST: validate, store score, call Klaviyo, return leaderboard
+│   ├── start-session.js   — POST: create game session, return sessionId
+│   ├── submit-score.js    — POST: validate session + score, store, call Klaviyo, return leaderboard
 │   └── leaderboard.js     — GET: return cached top 10
 ├── index.html             — (unchanged)
 ├── app.js                 — add submission form logic + leaderboard rendering
@@ -33,6 +34,7 @@ Redis sorted sets are purpose-built for leaderboards. Three key patterns:
 - **`leaderboard`** — Sorted set. Members are email addresses (the unique identifier), scores are the values. Provides top 10 (`ZREVRANGE`), rank lookups (`ZREVRANK`), and conditional insert (`ZADD GT`) as single commands. Display names are resolved from the player hash.
 - **`player:{email}`** — Hash per player. Stores `name`, `email`, `score`. Used for deduplication (by email) and Klaviyo calls.
 - **`ratelimit:{email}`** — String with 1-hour TTL. Incremented per submission, auto-expires. Max 10 submissions per email per hour.
+- **`session:{sessionId}`** — Hash with 10-minute TTL. Stores `startTime` and `used` flag. Created when a game starts, consumed on score submission. Prevents score submissions without a valid game session.
 
 ### Caching Strategy
 
@@ -44,6 +46,26 @@ The top 10 leaderboard is edge-cached for 30 seconds via `Cache-Control: s-maxag
 
 ## API Design
 
+### `POST /api/start-session`
+
+Called when the game starts. Creates a server-side session that tracks when the game began.
+
+**Request body:** (empty)
+
+**Processing steps:**
+1. Generate a random `sessionId` (e.g., `crypto.randomUUID()`)
+2. Store in Redis: `session:{sessionId}` → `{ startTime: Date.now(), used: false }` with 10-minute TTL
+3. Return the sessionId
+
+**Response:**
+```json
+{
+  "sessionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+}
+```
+
+The 10-minute TTL means abandoned sessions clean themselves up. The `used` flag prevents replaying the same session to submit multiple scores.
+
 ### `POST /api/submit-score`
 
 **Request body:**
@@ -52,22 +74,24 @@ The top 10 leaderboard is edge-cached for 30 seconds via `Cache-Control: s-maxag
   "name": "Kalok2576",
   "email": "kalok@example.com",
   "score": 275,
+  "sessionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "turnstileToken": "xxx"
 }
 ```
 
 **Processing steps (in order):**
-1. Validate Turnstile token with Cloudflare's verify API — reject if bot
-2. Rate limit: check `ratelimit:{email}`, reject if >= 10 submissions in the last hour
-3. Validate inputs:
+1. Validate game session: look up `session:{sessionId}` in Redis — reject if missing (expired/invalid), already used, or started less than 5 seconds ago (impossibly fast game). Mark session as used.
+2. Validate Turnstile token with Cloudflare's verify API — reject if bot
+3. Rate limit: check `ratelimit:{email}`, reject if >= 10 submissions in the last hour
+4. Validate inputs:
    - `name`: max 16 characters, alphanumeric + basic characters, no URLs (reject patterns like `http`, `www`, `.com`)
    - `email`: valid email format
    - `score`: positive integer
-4. Write score to Redis sorted set with `ZADD GT` (only updates if new score is higher)
-5. Store/update player hash at `player:{email}` with name, email, score
-6. Fire-and-forget Klaviyo API call (create/update profile, subscribe to list)
-7. Read fresh top 10 + user's rank from Redis
-8. Return response
+5. Write score to Redis sorted set with `ZADD GT` (only updates if new score is higher)
+6. Store/update player hash at `player:{email}` with name, email, score
+7. Fire-and-forget Klaviyo API call (create/update profile, subscribe to list)
+8. Read fresh top 10 + user's rank from Redis
+9. Return response
 
 **Response:**
 ```json
@@ -84,7 +108,7 @@ The top 10 leaderboard is edge-cached for 30 seconds via `Cache-Control: s-maxag
 
 **Error responses:**
 - `400` — validation failure (bad input, URL in name, invalid format)
-- `403` — Turnstile verification failed
+- `403` — Turnstile verification failed or invalid/expired/used session
 - `429` — rate limit exceeded
 
 ### `GET /api/leaderboard`
@@ -104,6 +128,14 @@ The top 10 leaderboard is edge-cached for 30 seconds via `Cache-Control: s-maxag
 ```
 
 ## Bot Protection & Security
+
+### Game Session Tokens
+- When the game starts, the client calls `POST /api/start-session` and receives a `sessionId`
+- The session is stored in Redis with a 10-minute TTL and a `used` flag
+- On score submission, the server validates: session exists, hasn't been used, and at least 5 seconds have elapsed since game start
+- After validation, the session is marked as used (single-use)
+- Prevents direct API calls from the console — an attacker would need to start a session first and wait for realistic timing
+- Sessions auto-expire after 10 minutes, no cleanup needed
 
 ### Cloudflare Turnstile (invisible mode)
 - Free widget that runs an invisible challenge in the background while the user fills in the submission form
@@ -192,5 +224,4 @@ With edge caching, even 100K daily users result in minimal DB requests. Total co
 ## Future Enhancements (Not in Scope)
 
 - Profanity filter for usernames (Dutch + English, likely using `obscenity` package + LDNOOBW word list)
-- Server-side score validation
 - Social sharing from leaderboard
