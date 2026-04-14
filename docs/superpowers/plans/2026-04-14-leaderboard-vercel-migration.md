@@ -6,7 +6,7 @@
 
 **Architecture:** Vercel serves existing static files + three serverless API endpoints. Redis (Vercel KV) stores leaderboard scores, player data, sessions, and rate limits. Cloudflare Turnstile provides invisible bot protection. Klaviyo receives email signups via fire-and-forget API calls.
 
-**Tech Stack:** Vanilla JS (no framework), Vercel Serverless Functions (Node.js), @vercel/kv (Redis), Cloudflare Turnstile, Klaviyo v3 API
+**Tech Stack:** Vanilla JS (no framework), Vercel Serverless Functions (Node.js), @upstash/redis (Redis), Cloudflare Turnstile, Klaviyo v3 API
 
 **Spec:** `docs/superpowers/specs/2026-04-14-leaderboard-vercel-migration-design.md`
 
@@ -34,7 +34,7 @@ node_modules/
   "name": "patta-game-concept",
   "private": true,
   "dependencies": {
-    "@vercel/kv": "^2.0.0"
+    "@upstash/redis": "^1.34.0"
   }
 }
 ```
@@ -86,7 +86,9 @@ git commit -m "chore: add Vercel project scaffolding with @vercel/kv"
 Create `api/start-session.js`:
 
 ```javascript
-import { kv } from '@vercel/kv';
+import { Redis } from '@upstash/redis';
+
+const redis = Redis.fromEnv();
 import { randomUUID } from 'crypto';
 
 export default async function handler(req, res) {
@@ -96,7 +98,7 @@ export default async function handler(req, res) {
 
   const sessionId = randomUUID();
 
-  await kv.set(`session:${sessionId}`, {
+  await redis.set(`session:${sessionId}`, {
     startTime: Date.now(),
     used: false,
   }, { ex: 600 }); // 10-minute TTL
@@ -156,7 +158,9 @@ git commit -m "feat: add start-session API endpoint"
 Create `lib/leaderboard.js`:
 
 ```javascript
-import { kv } from '@vercel/kv';
+import { Redis } from '@upstash/redis';
+
+const redis = Redis.fromEnv();
 
 /**
  * Fetches the top N entries from the leaderboard sorted set.
@@ -164,14 +168,14 @@ import { kv } from '@vercel/kv';
  */
 export async function getTopTen(count = 10) {
   // Get top emails from the sorted set (highest scores first)
-  const emails = await kv.zrange('leaderboard', 0, count - 1, { rev: true });
+  const emails = await redis.zrange('leaderboard', 0, count - 1, { rev: true });
 
   if (!emails || emails.length === 0) {
     return [];
   }
 
   // Fetch scores and player names in a pipeline
-  const pipeline = kv.pipeline();
+  const pipeline = redis.pipeline();
   for (const email of emails) {
     pipeline.zscore('leaderboard', email);
     pipeline.hget(`player:${email}`, 'name');
@@ -247,7 +251,9 @@ git commit -m "feat: add leaderboard GET API endpoint with shared helper"
 Create `api/submit-score.js`:
 
 ```javascript
-import { kv } from '@vercel/kv';
+import { Redis } from '@upstash/redis';
+
+const redis = Redis.fromEnv();
 import { getTopTen } from '../lib/leaderboard.js';
 
 export default async function handler(req, res) {
@@ -284,10 +290,10 @@ export default async function handler(req, res) {
   }
 
   // 5. Write score (GT = only update if new score is higher)
-  await kv.zadd('leaderboard', { gt: true }, { score, member: emailLower });
+  await redis.zadd('leaderboard', { gt: true }, { score, member: emailLower });
 
   // 6. Store/update player data
-  await kv.hset(`player:${emailLower}`, { name: name.trim(), email: emailLower, score });
+  await redis.hset(`player:${emailLower}`, { name: name.trim(), email: emailLower, score });
 
   // 7. Fire-and-forget Klaviyo call
   subscribeToKlaviyo(emailLower, name.trim(), score).catch(() => {});
@@ -311,13 +317,13 @@ export default async function handler(req, res) {
 async function validateSession(sessionId) {
   if (!sessionId) return 'Missing session ID';
 
-  const session = await kv.get(`session:${sessionId}`);
+  const session = await redis.get(`session:${sessionId}`);
   if (!session) return 'Invalid or expired session';
   if (session.used) return 'Session already used';
   if (Date.now() - session.startTime < 5000) return 'Score submitted too quickly';
 
   // Mark session as used
-  await kv.set(`session:${sessionId}`, { ...session, used: true }, { ex: 600 });
+  await redis.set(`session:${sessionId}`, { ...session, used: true }, { ex: 600 });
   return null;
 }
 
@@ -354,11 +360,11 @@ function validateInputs(name, email, score) {
 
 async function checkRateLimit(email) {
   const key = `ratelimit:${email}`;
-  const count = await kv.incr(key);
+  const count = await redis.incr(key);
 
   // Set TTL on first increment
   if (count === 1) {
-    await kv.expire(key, 3600);
+    await redis.expire(key, 3600);
   }
 
   if (count > 10) return 'Too many submissions. Try again later.';

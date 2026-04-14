@@ -27,7 +27,7 @@ Static files (index.html, app.js, style.css, assets/) served directly by Vercel.
 └── vercel.json            — routing config, caching headers
 ```
 
-### Database: Vercel KV (Upstash Redis)
+### Database: Upstash Redis (@upstash/redis)
 
 Redis sorted sets are purpose-built for leaderboards. Three key patterns:
 
@@ -215,7 +215,7 @@ KLAVIYO_LIST_ID         — the campaign list ID in Klaviyo
 
 - **Vercel hosting**: Free tier (100GB bandwidth/month)
 - **Vercel Serverless Functions**: Free tier (100K invocations/month) — most leaderboard reads served from edge cache
-- **Vercel KV**: Free tier (3K requests/day) likely sufficient with caching; overage at $0.20/100K requests
+- **Upstash Redis**: Free tier (10K requests/day) likely sufficient with caching; pay-as-you-go at $0.20/100K requests
 - **Cloudflare Turnstile**: Free
 - **Klaviyo API**: Included in existing Klaviyo plan
 
