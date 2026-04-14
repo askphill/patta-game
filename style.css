@@ -694,3 +694,130 @@ canvas.active {
 #turnstile-container {
     min-height: 0;
 }
+
+/* ── LEADERBOARD OVERLAY ── */
+.leaderboard-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    z-index: 4;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s var(--ease-out-cubic);
+    overflow: hidden;
+}
+
+.splash-panel.leaderboard-active .leaderboard-overlay {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.leaderboard-top {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 18px;
+    gap: 4px;
+}
+
+.leaderboard-title {
+    width: 80%;
+    max-width: 310px;
+    height: auto;
+}
+
+.leaderboard-label {
+    font-family: 'Neue Pixel Grotesk', monospace;
+    font-size: 15px;
+    color: #e9e9e9;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+}
+
+.leaderboard-table {
+    width: calc(100% - 36px);
+    margin-top: 18px;
+    border: 2px solid #fff;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+.leaderboard-table-header {
+    display: flex;
+    padding: 8px 12px;
+    border-bottom: 2px solid #fff;
+    font-family: 'Neue Pixel Grotesk', monospace;
+    font-size: 14px;
+    color: #e9e9e9;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+}
+
+.leaderboard-rows {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.leaderboard-row {
+    display: flex;
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    font-family: 'Neue Pixel Grotesk', monospace;
+    font-size: 14px;
+    color: #fff;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+}
+
+.leaderboard-row.user-row {
+    background: rgba(0, 81, 232, 0.6);
+}
+
+.leaderboard-row.separator-row {
+    border-bottom: 2px solid #fff;
+    padding: 2px;
+}
+
+.lb-col-rank {
+    width: 40px;
+    flex-shrink: 0;
+}
+
+.lb-col-name {
+    flex: 1;
+}
+
+.lb-col-score {
+    width: 70px;
+    flex-shrink: 0;
+    text-align: right;
+}
+
+.btn-back {
+    position: absolute;
+    top: 18px;
+    left: 18px;
+    height: 20px;
+    border: 2px solid #fff;
+    background: #0051e8;
+    color: #e9e9e9;
+    font-family: 'Neue Pixel Grotesk', monospace;
+    font-size: 14px;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    cursor: pointer;
+    padding: 0 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    z-index: 5;
+    transition: filter 0.15s var(--ease-out-cubic);
+}
+
+.btn-back:hover {
+    filter: brightness(1.2);
+}
