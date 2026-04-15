@@ -1,10 +1,12 @@
 import { redis } from '../lib/redis.js';
 import { randomUUID } from 'crypto';
+import { validateOrigin } from '../lib/origin.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+  if (!validateOrigin(req, res)) return;
 
   // IP-based rate limit: max 60 sessions per IP per hour
   const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';

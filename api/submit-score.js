@@ -1,40 +1,54 @@
 import { redis } from '../lib/redis.js';
 import { getTopTen } from '../lib/leaderboard.js';
+import { containsProfanity } from '../lib/profanity.js';
+import { validateOrigin } from '../lib/origin.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+  if (!validateOrigin(req, res)) return;
 
-  const { name, email, score, sessionId, turnstileToken } = req.body;
+  const GENERIC_ERROR = 'Submission failed. Please try again.';
+  const { name, email, _v: score, _s: sig, sessionId, turnstileToken } = req.body;
+
+  // Verify payload signature
+  if (!verifySignature(name, email, score, sessionId, sig)) {
+    return res.status(403).json({ error: GENERIC_ERROR });
+  }
 
   const clientIpForTurnstile = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
 
-  // 1. Verify Turnstile token (before session, so session isn't consumed on failure)
+  // 1. Verify Turnstile token
   const turnstileError = await verifyTurnstile(turnstileToken, clientIpForTurnstile);
   if (turnstileError) {
-    return res.status(403).json({ error: turnstileError });
+    return res.status(403).json({ error: GENERIC_ERROR });
   }
 
-  // 2. Validate inputs
+  // 2. Validate inputs (user-facing errors for fixable issues)
   const inputError = validateInputs(name, email, score);
   if (inputError) {
     return res.status(400).json({ error: inputError });
   }
 
-  // 3. Validate session (atomic delete prevents reuse)
+  // 3. Check profanity (user-facing, specific message)
+  if (containsProfanity(name)) {
+    return res.status(400).json({ error: 'Username not allowed, Patta got love for all' });
+  }
+
+  // 4. Validate session
   const sessionError = await validateSession(sessionId, score);
   if (sessionError) {
-    return res.status(403).json({ error: sessionError });
+    return res.status(403).json({ error: GENERIC_ERROR });
   }
 
   const emailLower = email.toLowerCase().trim();
   const clientIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
 
-  // 4. Rate limit (per email + per IP)
+  // 5. Rate limit
   const rateLimitError = await checkRateLimit(emailLower, clientIp);
   if (rateLimitError) {
-    return res.status(429).json({ error: rateLimitError });
+    return res.status(429).json({ error: GENERIC_ERROR });
   }
 
   // 5. Write score (GT = only update if new score is higher)
@@ -45,7 +59,7 @@ export default async function handler(req, res) {
 
   // 7. Klaviyo call (fire-and-forget, don't block response)
   const klaviyoPromise = subscribeToKlaviyo(emailLower, name.trim(), score).catch((err) => {
-    console.error('[Klaviyo] Error:', err.message || err);
+    // Klaviyo error silently ignored
   });
 
   // 8. Get fresh leaderboard + user rank
@@ -102,6 +116,16 @@ async function verifyTurnstile(token, ip) {
   return null;
 }
 
+function verifySignature(name, email, score, sessionId, sig) {
+  if (!sig || !sessionId || score === undefined) return false;
+  var key = sessionId + ':' + score + ':' + name.length;
+  var hash = 0;
+  for (var i = 0; i < key.length; i++) {
+    hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
+  }
+  return hash.toString(36) === sig;
+}
+
 function validateInputs(name, email, score) {
   if (!name || typeof name !== 'string') return 'Name is required';
   if (name.trim().length === 0 || name.trim().length > 16) return 'Name must be 1-16 characters';
@@ -140,7 +164,6 @@ async function subscribeToKlaviyo(email, name, score) {
   const apiKey = process.env.KLAVIYO_API_KEY;
   const listId = process.env.KLAVIYO_LIST_ID;
   if (!apiKey || !listId) {
-    console.log('[Klaviyo] Missing env vars — apiKey:', !!apiKey, 'listId:', !!listId);
     return;
   }
 
@@ -181,9 +204,6 @@ async function subscribeToKlaviyo(email, name, score) {
     }),
   });
 
-  const body = await res.text();
-  console.log('[Klaviyo] Subscribe status:', res.status, 'Response:', body);
-
   // Update profile with custom properties (separate API call)
   const profileRes = await fetch('https://a.klaviyo.com/api/profile-import/', {
     method: 'POST',
@@ -206,6 +226,4 @@ async function subscribeToKlaviyo(email, name, score) {
     }),
   });
 
-  const profileBody = await profileRes.text();
-  console.log('[Klaviyo] Profile update status:', profileRes.status, 'Response:', profileBody);
 }
