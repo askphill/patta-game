@@ -1,5 +1,6 @@
 import { redis } from '../lib/redis.js';
 import { getTopTen } from '../lib/leaderboard.js';
+import { containsProfanity } from '../lib/profanity.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -22,7 +23,13 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: inputError });
   }
 
-  // 3. Validate session (atomic delete prevents reuse)
+  // 3. Check profanity (before session so rejected name doesn't consume session)
+  console.log('[profanity] checking:', name, 'result:', containsProfanity(name));
+  if (containsProfanity(name)) {
+    return res.status(400).json({ error: 'Username not allowed, Patta got love for all' });
+  }
+
+  // 4. Validate session (atomic delete prevents reuse)
   const sessionError = await validateSession(sessionId, score);
   if (sessionError) {
     return res.status(403).json({ error: sessionError });
