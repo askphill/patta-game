@@ -93,6 +93,11 @@ function showScoreSubmit() {
   }
 }
 
+// Clear error when user edits the form
+scoreSubmitForm.addEventListener("input", () => {
+  scoreSubmitError.textContent = "";
+});
+
 scoreSubmitForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   scoreSubmitError.textContent = "";
@@ -146,6 +151,11 @@ scoreSubmitForm.addEventListener("submit", async (e) => {
         data.error || "SUBMISSION FAILED"
       ).toUpperCase();
       btnContinue.disabled = false;
+      // Reset Turnstile for retry
+      if (window.turnstile && turnstileWidgetId) {
+        turnstile.reset(turnstileWidgetId);
+        turnstileToken = null;
+      }
       return;
     }
 
