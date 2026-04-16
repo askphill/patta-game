@@ -10,10 +10,11 @@ export default async function handler(req, res) {
   if (!validateOrigin(req, res)) return;
 
   const GENERIC_ERROR = 'Submission failed. Please try again.';
-  const { name, email, _v: score, _s: sig, sessionId, turnstileToken } = req.body;
+  const { name, email, _v: score, _b: baseScore, _s: sig, sessionId, turnstileToken } = req.body;
 
   // Verify payload signature
   if (!verifySignature(name, email, score, sessionId, sig)) {
+    console.log('[REJECT] signature', { name, score, sessionId, sig });
     return res.status(403).json({ error: GENERIC_ERROR });
   }
 
@@ -22,12 +23,14 @@ export default async function handler(req, res) {
   // 1. Verify Turnstile token
   const turnstileError = await verifyTurnstile(turnstileToken, clientIpForTurnstile);
   if (turnstileError) {
+    console.log('[REJECT] turnstile', turnstileError);
     return res.status(403).json({ error: GENERIC_ERROR });
   }
 
   // 2. Validate inputs (user-facing errors for fixable issues)
-  const inputError = validateInputs(name, email, score);
+  const inputError = validateInputs(name, email, score, baseScore);
   if (inputError) {
+    console.log('[REJECT] input', inputError);
     return res.status(400).json({ error: inputError });
   }
 
@@ -37,8 +40,9 @@ export default async function handler(req, res) {
   }
 
   // 4. Validate session
-  const sessionError = await validateSession(sessionId, score);
+  const sessionError = await validateSession(sessionId, baseScore || score);
   if (sessionError) {
+    console.log('[REJECT] session', sessionError);
     return res.status(403).json({ error: GENERIC_ERROR });
   }
 
@@ -126,7 +130,7 @@ function verifySignature(name, email, score, sessionId, sig) {
   return hash.toString(36) === sig;
 }
 
-function validateInputs(name, email, score) {
+function validateInputs(name, email, score, baseScore) {
   if (!name || typeof name !== 'string') return 'Name is required';
   if (name.trim().length === 0 || name.trim().length > 16) return 'Name must be 1-16 characters';
   if (!/^[a-zA-Z0-9_@. -]+$/.test(name.trim())) return 'Name contains invalid characters';
@@ -136,6 +140,9 @@ function validateInputs(name, email, score) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return 'Invalid email format';
 
   if (!Number.isInteger(score) || score < 1 || score > 500) return 'Invalid score';
+
+  // Bonus can't exceed max possible (4 bonuses × 10)
+  if (baseScore && score - baseScore > 80) return 'Invalid score';
 
   return null;
 }

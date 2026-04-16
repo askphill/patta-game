@@ -60,6 +60,15 @@ let currentSessionId = null;
 let turnstileToken = null;
 let turnstileWidgetId = null;
 
+function signPayload(name, email, val, sid) {
+  var key = sid + ':' + val + ':' + name.length;
+  var hash = 0;
+  for (var i = 0; i < key.length; i++) {
+    hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
+  }
+  return hash.toString(36);
+}
+
 async function startSession() {
   try {
     const res = await fetch("/api/start-session", { method: "POST" });
@@ -138,7 +147,9 @@ scoreSubmitForm.addEventListener("submit", async (e) => {
       body: JSON.stringify({
         name,
         email,
-        score,
+        _v: score,
+        _b: baseScore,
+        _s: signPayload(name, email, score, currentSessionId),
         sessionId: currentSessionId,
         turnstileToken,
       }),
@@ -267,6 +278,7 @@ const ASSETS_TO_LOAD = [
   "assets/key-space.png",
   "assets/btn-submit.png",
   "assets/patta-nike-marquee.png",
+  "assets/unite-logo.png",
 ];
 
 let loadedCount = 0;
@@ -629,7 +641,7 @@ const LEVELS = [
   },
   {
     name: "LOCAL STADIUM",
-    threshold: 30,
+    threshold: 20,
     bgSrc: "assets/bg-level2.jpg",
     bgImg: null,
   },
@@ -669,13 +681,29 @@ function getLevel(s) {
 // Game state
 const BALL_START_Y = CSS_H * 0.76; // Figma: ball at ~76% from top
 let ball = { x: CSS_W / 2, y: BALL_START_Y, vy: 0, vx: 0, angle: 0, spin: 0 };
-let score = 0;
+let baseScore = 0; // drives difficulty
+let bonusScore = 0; // bonus points from logo hits
+let score = 0; // displayScore = baseScore + bonusScore
 let highScore = parseInt(localStorage.getItem("keepballup_high") || "0");
 let state = "start"; // 'start', 'playing', 'over', 'leveltransition'
 let particles = [];
 let screenShake = 0;
 let canKick = true; // only one kick per ball rise
 let wasGoingDown = false; // track when ball starts falling
+
+// Bonus logo state
+const bonusPattaImg = new Image();
+bonusPattaImg.src = "assets/patta-logo.png";
+const bonusUniteImg = new Image();
+bonusUniteImg.src = "assets/unite-logo.png";
+
+const BONUS_LOGO_W = 50;
+const BONUS_LOGO_H = 30;
+let bonusLogo = { active: false, x: 0, y: 0, alpha: 0, type: 'patta', dir: 1, speed: 2, points: 10 };
+let bonusText = { active: false, x: 0, y: 0, alpha: 0, scale: 1, text: '+10' };
+let lastBonusKick = 0; // track when last UNITE bonus spawned
+let scorePulse = 0; // pulse timer for score animation on bonus hit
+let nextUniteKick = 15 + Math.floor(Math.random() * 11); // first UNITE at 15-25 kicks
 
 // Hit zone (rectangular)
 let zoneHeight = ZONE_HEIGHT_START;
@@ -699,6 +727,8 @@ const COLORS = {
 };
 
 function resetGame() {
+  baseScore = 0;
+  bonusScore = 0;
   score = 0;
   currentLevel = 0;
   ball = { x: CSS_W / 2, y: BALL_START_Y, vy: 0, vx: 0, angle: 0, spin: 0 };
@@ -708,6 +738,11 @@ function resetGame() {
   zoneBobPhase = 0;
   ZONE_CENTER_Y = ZONE_CENTER_Y_BASE;
   particles = [];
+  bonusLogo.active = false;
+  bonusText.active = false;
+  lastBonusKick = 0;
+  nextUniteKick = 15 + Math.floor(Math.random() * 11);
+  zonePulseTimer = 0;
 }
 
 function ballInZone() {
@@ -718,14 +753,14 @@ function ballInZone() {
 
 function updateZone(zoneDt) {
   zoneDt = zoneDt || 1;
-  let progress = DEBUG_HARD_MODE ? 1 : Math.min(score / ZONE_SHRINK_SCORE, 1);
+  let progress = DEBUG_HARD_MODE ? 1 : Math.min(baseScore / ZONE_SHRINK_SCORE, 1);
   var baseHeight = ZONE_HEIGHT_START - (ZONE_HEIGHT_START - ZONE_HEIGHT_FLOOR) * progress;
   // Keep shrinking slowly past score 100 — no plateau
-  var endlessShrink = score > ZONE_SHRINK_SCORE ? (score - ZONE_SHRINK_SCORE) * ZONE_ENDLESS_SHRINK : 0;
+  var endlessShrink = baseScore > ZONE_SHRINK_SCORE ? (baseScore - ZONE_SHRINK_SCORE) * ZONE_ENDLESS_SHRINK : 0;
   zoneHeight = Math.max(4, baseHeight - endlessShrink);
 
-  // Bob the zone — speed increases per level + gradual creep after score 80
-  var extraSpeed = score > 60 ? (score - 60) * 0.0003 : 0;
+  // Bob the zone — speed increases per level + gradual creep after score 60
+  var extraSpeed = baseScore > 60 ? (baseScore - 60) * 0.0003 : 0;
   var bobSpeed = DEBUG_HARD_MODE ? 0.06 : ZONE_BOB_SPEED_BASE + (currentLevel * ZONE_BOB_SPEED_PER_LEVEL) + extraSpeed;
   zoneBobPhase += bobSpeed * zoneDt;
   const bobAmount = ZONE_BOB_AMPLITUDE * progress;
@@ -778,7 +813,8 @@ function kick() {
     ball.vy = KICK_FORCE * 1.7;
     ball.vx = (Math.random() - 0.5) * 4;
     ball.spin = ball.vx * 0.08;
-    score = 1;
+    baseScore = 1;
+    score = baseScore + bonusScore;
     canKick = false;
     screenShake = 4;
     spawnParticles(ball.x, ball.y);
@@ -800,17 +836,47 @@ function kick() {
       return;
     }
 
+    // Check bonus logo hit
+    if (bonusLogo.active && ballHitsBonusLogo()) {
+      bonusScore += bonusLogo.points;
+      bonusText = { active: true, x: ball.x, y: ball.y - 30, alpha: 1, scale: 1, text: '+' + bonusLogo.points };
+      bonusLogo.active = false;
+      scorePulse = 30; // trigger score animation
+      screenShake = 6;
+      spawnBonusParticles(ball.x, ball.y);
+    }
+
     ball.vy = KICK_FORCE;
     ball.vx = (Math.random() - 0.5) * 4;
     ball.spin = ball.vx * 0.08;
-    score++;
+    baseScore++;
+    score = baseScore + bonusScore;
     screenShake = 4;
     spawnParticles(ball.x, ball.y);
     haptic("success", score);
     updateZone();
 
+    // Spawn bonus logo at mid-level points (roughly middle of each level)
+    // Patta bonus at mid-level points (+10, rare)
+    var pattaTriggers = [10, 45, 95, 140];
+    if (!bonusLogo.active && pattaTriggers.indexOf(baseScore) !== -1) {
+      var dir = Math.random() > 0.5 ? 1 : -1;
+      var yRange = zoneHeight * 0.6;
+      var bonusY = ZONE_CENTER_Y + (Math.random() - 0.5) * yRange - BONUS_LOGO_H / 2;
+      bonusLogo = { active: true, x: dir === 1 ? -BONUS_LOGO_W : CSS_W, y: bonusY, alpha: 0, type: 'patta', dir: dir, speed: 2.5, points: 10 };
+    }
+
+    // UNITE bonus randomly every 15-25 kicks (+5, common)
+    if (!bonusLogo.active && baseScore >= nextUniteKick) {
+      var dir = Math.random() > 0.5 ? 1 : -1;
+      var yRange = zoneHeight * 0.6;
+      var bonusY = ZONE_CENTER_Y + (Math.random() - 0.5) * yRange - BONUS_LOGO_H / 2;
+      bonusLogo = { active: true, x: dir === 1 ? -BONUS_LOGO_W : CSS_W, y: bonusY, alpha: 0, type: 'unite', dir: dir, speed: 1.5, points: 5 };
+      nextUniteKick = baseScore + 15 + Math.floor(Math.random() * 11);
+    }
+
     // Check for level up
-    const newLevel = getLevel(score);
+    const newLevel = getLevel(baseScore);
     if (newLevel > currentLevel) {
       currentLevel = newLevel;
       levelTransTimer = LEVEL_TRANS_DURATION; // show banner
@@ -846,16 +912,28 @@ canvas.addEventListener("mousedown", function (e) {
 });
 
 // Draw the hit zone (full-width rectangle, shrinks to 4px line)
+let zonePulseTimer = 0;
+
 function drawZone() {
   const zoneTop = ZONE_CENTER_Y - zoneHeight / 2;
 
-  // Green fill — visible but not opaque
-  ctx.fillStyle = "rgba(0, 255, 0, 0.12)";
+  // Pulse effect for first 5 seconds of gameplay
+  var pulse = 0;
+  if (zonePulseTimer < 120) { // ~2 seconds at 60fps
+    zonePulseTimer++;
+    pulse = Math.sin(zonePulseTimer * 0.15) * 0.5 + 0.5; // 0 to 1 oscillation
+  }
+
+  // Green fill — pulses brighter at start
+  var fillAlpha = 0.12 + pulse * 0.15;
+  ctx.fillStyle = "rgba(0, 255, 0, " + fillAlpha + ")";
   ctx.fillRect(0, zoneTop, CSS_W, zoneHeight);
 
-  // Bright neon green border lines (matching Figma)
-  ctx.strokeStyle = "#00ff00";
-  ctx.lineWidth = 3;
+  // Bright neon green border lines — pulses wider/brighter at start
+  var lineWidth = 3 + pulse * 3;
+  var borderAlpha = 1;
+  ctx.strokeStyle = "rgba(0, 255, 0, " + borderAlpha + ")";
+  ctx.lineWidth = lineWidth;
   ctx.beginPath();
   ctx.moveTo(0, zoneTop);
   ctx.lineTo(CSS_W, zoneTop);
@@ -996,6 +1074,92 @@ function drawParticles() {
   }
 }
 
+// ── BONUS LOGO ──
+function ballHitsBonusLogo() {
+  var lx = bonusLogo.x, ly = bonusLogo.y;
+  return ball.x + BALL_SIZE > lx && ball.x - BALL_SIZE < lx + BONUS_LOGO_W &&
+         ball.y + BALL_SIZE > ly && ball.y - BALL_SIZE < ly + BONUS_LOGO_H;
+}
+
+function spawnBonusParticles(x, y) {
+  var colors = ["#FF6B00", "#0051E8", "#FF6B00", "#0051E8", "#FDDB05"];
+  for (var i = 0; i < 12; i++) {
+    particles.push({
+      x: x, y: y,
+      vx: (Math.random() - 0.5) * 8,
+      vy: (Math.random() - 0.5) * 8,
+      life: 25 + Math.random() * 10,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      size: 3 + Math.random() * 4,
+    });
+  }
+}
+
+function updateBonusLogo(dt) {
+  if (!bonusLogo.active) return;
+  bonusLogo.x += bonusLogo.speed * bonusLogo.dir * dt;
+
+  // Fade in/out based on direction
+  var enterEdge = bonusLogo.dir === 1 ? bonusLogo.x < 40 : bonusLogo.x > CSS_W - BONUS_LOGO_W - 40;
+  var exitEdge = bonusLogo.dir === 1 ? bonusLogo.x > CSS_W - BONUS_LOGO_W - 40 : bonusLogo.x < 40;
+
+  if (enterEdge) {
+    bonusLogo.alpha = Math.min(1, bonusLogo.alpha + 0.05 * dt);
+  }
+  if (exitEdge) {
+    bonusLogo.alpha = Math.max(0, bonusLogo.alpha - 0.05 * dt);
+  }
+
+  // Remove when off screen
+  if (bonusLogo.dir === 1 && bonusLogo.x > CSS_W) bonusLogo.active = false;
+  if (bonusLogo.dir === -1 && bonusLogo.x < -BONUS_LOGO_W) bonusLogo.active = false;
+}
+
+function drawBonusLogo() {
+  if (!bonusLogo.active || bonusLogo.alpha <= 0) return;
+  var img = bonusLogo.type === 'patta' ? bonusPattaImg : bonusUniteImg;
+  if (!img.complete || img.naturalWidth === 0) return;
+  var cx = bonusLogo.x + BONUS_LOGO_W / 2;
+  var cy = bonusLogo.y + BONUS_LOGO_H / 2;
+  var bob = Math.sin(bonusLogo.x * 0.04) * 8;
+  var rotation = Math.sin(bonusLogo.x * 0.025) * 0.2;
+  ctx.save();
+  ctx.globalAlpha = bonusLogo.alpha * 0.8;
+  ctx.translate(cx, cy + bob);
+  ctx.rotate(rotation);
+  var w = BONUS_LOGO_W;
+  var h = BONUS_LOGO_H;
+  if (img.naturalWidth && img.naturalHeight) {
+    var aspect = img.naturalWidth / img.naturalHeight;
+    h = BONUS_LOGO_H;
+    w = h * aspect;
+  }
+  ctx.drawImage(img, -w / 2, -h / 2, w, h);
+  ctx.restore();
+}
+
+function updateBonusText(dt) {
+  if (!bonusText.active) return;
+  bonusText.alpha -= 0.02 * dt;
+  bonusText.scale += 0.015 * dt;
+  bonusText.y -= 0.5 * dt;
+  if (bonusText.alpha <= 0) bonusText.active = false;
+}
+
+function drawBonusText() {
+  if (!bonusText.active) return;
+  ctx.save();
+  ctx.globalAlpha = bonusText.alpha;
+  ctx.translate(bonusText.x, bonusText.y);
+  ctx.scale(bonusText.scale, bonusText.scale);
+  ctx.font = "28px 'Neue Pixel Grotesk', monospace";
+  ctx.fillStyle = "#FF6B00";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(bonusText.text || "+10", 0, 0);
+  ctx.restore();
+}
+
 // Main game loop
 let rafId = null;
 let lastFrameTime = 0;
@@ -1077,7 +1241,7 @@ function update(timestamp) {
     }
 
     // Ball fell below zone = game over (grace period for first 2 kicks)
-    if (score > 2) {
+    if (baseScore > 2) {
       const zoneBottom = ZONE_CENTER_Y + zoneHeight / 2;
       if (ball.y > zoneBottom) {
         state = "over";
@@ -1117,12 +1281,36 @@ function update(timestamp) {
       }
     }
 
+    // Bonus logo (drawn behind ball)
+    updateBonusLogo(dt);
+    drawBonusLogo();
+
     drawBall();
     updateParticles(dt);
     drawParticles();
 
-    // Score — bottom-left, 63px white
-    drawText(score.toString(), 20, CSS_H - 40, 63, "#ffffff", "left");
+    // Bonus +10 text (drawn on top)
+    updateBonusText(dt);
+    drawBonusText();
+
+    // Score — bottom-left, 63px white, pulses on bonus hit
+    if (scorePulse > 0) {
+      scorePulse--;
+      var pulseScale = 1 + Math.sin(scorePulse * 0.3) * 0.15;
+      var pulseColor = scorePulse % 6 < 3 ? "#FF6B00" : "#FDDB05";
+      ctx.save();
+      ctx.font = "63px 'Neue Pixel Grotesk', monospace";
+      var tw = ctx.measureText(score.toString()).width;
+      var cx = 20 + tw / 2;
+      var cy = CSS_H - 40;
+      ctx.translate(cx, cy);
+      ctx.scale(pulseScale, pulseScale);
+      ctx.translate(-cx, -cy);
+      drawText(score.toString(), 20, CSS_H - 40, 63, pulseColor, "left");
+      ctx.restore();
+    } else {
+      drawText(score.toString(), 20, CSS_H - 40, 63, "#ffffff", "left");
+    }
   }
 
   if (state === "over") {
