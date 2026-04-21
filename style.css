@@ -390,8 +390,7 @@ canvas.active {
 .splash-panel.score-submit-active .menu-marquee,
 .splash-panel.leaderboard-active .menu-buttons,
 .splash-panel.leaderboard-active .menu-footer,
-.splash-panel.leaderboard-active .menu-marquee,
-.splash-panel.menu-active .tournament-title {
+.splash-panel.leaderboard-active .menu-marquee {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.3s var(--ease-out-cubic);
@@ -570,7 +569,7 @@ canvas.active {
   transition:
     top 0.6s var(--ease-out-quart),
     transform 0.6s var(--ease-out-quart);
-  z-index: 1;
+  z-index: 2;
 }
 
 /* Menu state: title slides to top */
