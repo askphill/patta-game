@@ -347,18 +347,31 @@ canvas.active {
 .splash-panel::before {
   content: "";
   position: absolute;
-  inset: -112px;
-  background-image: url("assets/pattern-tile.png");
-  background-size: 112px;
-  background-repeat: repeat;
-  opacity: 0.14;
+  inset: 0;
+  background-image: url("assets/bg-menu.png");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
   pointer-events: none;
-  animation: pattern-drift 20s linear infinite;
 }
 
-@keyframes pattern-drift {
-  0% { transform: translate(0, 0); }
-  100% { transform: translate(112px, 112px); }
+.menu-marquee {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 164px;
+  height: 158px;
+  background-image: url("assets/patta-nike-marquee.png");
+  background-repeat: repeat-x;
+  background-size: auto 100%;
+  animation: menu-marquee-scroll 18s linear infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+
+@keyframes menu-marquee-scroll {
+  from { background-position: 0 0; }
+  to { background-position: -1374.6px 0; }
 }
 
 .splash-panel.visible {
@@ -370,11 +383,15 @@ canvas.active {
 .splash-panel.game-active .tournament-title,
 .splash-panel.game-active .menu-buttons,
 .splash-panel.game-active .menu-footer,
+.splash-panel.game-active .menu-marquee,
 .splash-panel.score-submit-active .tournament-title,
 .splash-panel.score-submit-active .menu-buttons,
 .splash-panel.score-submit-active .menu-footer,
+.splash-panel.score-submit-active .menu-marquee,
 .splash-panel.leaderboard-active .menu-buttons,
-.splash-panel.leaderboard-active .menu-footer {
+.splash-panel.leaderboard-active .menu-footer,
+.splash-panel.leaderboard-active .menu-marquee,
+.splash-panel.menu-active .tournament-title {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.3s var(--ease-out-cubic);
@@ -422,6 +439,20 @@ canvas.active {
 /* ── GAME OVER STATE ── */
 .splash-panel.game-over canvas {
   filter: grayscale(1) brightness(0.3);
+}
+
+.splash-panel.game-over,
+.splash-panel.game-over *,
+.splash-panel.game-over *::before,
+.splash-panel.game-over *::after {
+  animation-play-state: paused !important;
+}
+
+.splash-panel.game-active .menu-marquee,
+.splash-panel.game-over .menu-marquee,
+.splash-panel.score-submit-active .menu-marquee,
+.splash-panel.leaderboard-active .menu-marquee {
+  animation-play-state: paused !important;
 }
 
 /* Game over overlay */

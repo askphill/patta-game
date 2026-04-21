@@ -279,6 +279,7 @@ const ASSETS_TO_LOAD = [
   "assets/btn-submit.png",
   "assets/patta-nike-marquee.png",
   "assets/unite-logo.png",
+  "assets/bg-menu.png",
 ];
 
 let loadedCount = 0;
@@ -653,7 +654,7 @@ const LEVELS = [
   },
   {
     name: "WORLD CUP",
-    threshold: 120,
+    threshold: 110,
     bgSrc: "assets/bg-level4.jpg",
     bgImg: null,
   },
@@ -716,6 +717,7 @@ let storm = { active: false, timer: 0, flashTimer: 0, flashAlpha: 0 };
 var nextStormKick = 35 + Math.floor(Math.random() * 15); // first storm in level 1, never before kick 10
 var stormsThisLevel = 0;
 var rainDrops = [];
+var nextWalkerKick = 12 + Math.floor(Math.random() * 9);
 
 // Hit zone (rectangular)
 let zoneHeight = ZONE_HEIGHT_START;
@@ -764,6 +766,10 @@ function resetGame() {
   stormsThisLevel = 0;
   rainDrops = [];
   zonePulseTimer = 0;
+  walker = { active: false, x: 0, frame: 0, pendingSpawn: false };
+  nextWalkerKick = 12 + Math.floor(Math.random() * 9); // first walker between score 12 and 20
+  levelTransition = false;
+  levelTransTimer = 0;
 }
 
 function ballInZone() {
@@ -923,6 +929,12 @@ function kick() {
       haptic("error");
     }
 
+    // Walker trigger — random intervals, not in first 10 hits
+    if (!walker.active && !walker.pendingSpawn && baseScore >= nextWalkerKick) {
+      walker.pendingSpawn = true;
+      nextWalkerKick = baseScore + 15 + Math.floor(Math.random() * 21); // next in 15-35 hits
+    }
+
     // Check for level up
     const newLevel = getLevel(baseScore);
     if (newLevel > currentLevel) {
@@ -976,11 +988,12 @@ let sweetText = { active: false, x: 0, y: 0, alpha: 0, scale: 1, text: '' };
 function drawZone() {
   const zoneTop = ZONE_CENTER_Y - zoneHeight / 2;
 
-  // Pulse effect for first 5 seconds of gameplay
+  // Onboarding pulse — keeps pulsing until the player lands ~3 successful hits, then fades
   var pulse = 0;
-  if (zonePulseTimer < 120) { // ~2 seconds at 60fps
+  if (baseScore < 5) {
     zonePulseTimer++;
-    pulse = Math.sin(zonePulseTimer * 0.15) * 0.5 + 0.5; // 0 to 1 oscillation
+    var amp = baseScore < 3 ? 1 : 1 - (baseScore - 3) / 2; // full 0-2 kicks, fade out by kick 5
+    pulse = (Math.sin(zonePulseTimer * 0.15) * 0.5 + 0.5) * amp;
   }
 
   // Green fill — pulses brighter at start
@@ -1086,9 +1099,14 @@ function drawLevelTransition() {
 // Load marquee strip
 const marqueeImg = new Image();
 marqueeImg.src = "assets/patta-nike-marquee.png";
-const MARQUEE_H = 56;
-const MARQUEE_Y = CSS_H * 0.7;
+const MARQUEE_H = 53;
+const MARQUEE_BOTTOM = CSS_H * 0.7 + 2 + 56; // preserve previous bottom edge
+const MARQUEE_Y = MARQUEE_BOTTOM - MARQUEE_H;
 let marqueeX = 0;
+
+// Level 4 foreground mask (crowd/tunnel overlay covering the banner)
+const maskLevel4Img = new Image();
+maskLevel4Img.src = "assets/mask-level4.png";
 
 function drawMarquee(marqueeDt) {
   if (!marqueeImg.complete) return;
@@ -1100,6 +1118,66 @@ function drawMarquee(marqueeDt) {
     ctx.drawImage(marqueeImg, x, MARQUEE_Y, imgW, MARQUEE_H);
     x += imgW;
   }
+}
+
+function drawLevelForeground() {
+  if (currentLevel !== 3) return;
+  if (!maskLevel4Img.complete || !maskLevel4Img.naturalWidth) return;
+  const w = CSS_W;
+  const h = maskLevel4Img.naturalHeight * (CSS_W / maskLevel4Img.naturalWidth);
+  ctx.drawImage(maskLevel4Img, 0, CSS_H - h, w, h);
+}
+
+// ── WALKER (per-level character that walks across the screen on level entry) ──
+const WALKER_SPRITE_W = 210;       // source frame width
+const WALKER_SPRITE_H = 270;       // source frame height
+const WALKER_FRAMES = 20;
+const WALKER_SCALE = 0.4;          // on-screen scale — tweak as needed
+const WALKER_W = WALKER_SPRITE_W * WALKER_SCALE;
+const WALKER_H = WALKER_SPRITE_H * WALKER_SCALE;
+const WALKER_FEET_Y = CSS_H - 80; // y of feet; above the score counter
+const WALKER_SPEED = 180;          // px/second — tweak to taste
+const WALKER_LOOPS = 2;            // number of times the sprite sequence plays across one crossing
+
+// Preload per-level sprite sheets. Missing files are fine — walker silently skips.
+const walkerImages = LEVELS.map((_, i) => {
+  const img = new Image();
+  img.src = `assets/walker-level${i + 1}.png`;
+  return img;
+});
+
+let walker = { active: false, x: 0, frame: 0, pendingSpawn: false };
+
+function updateWalker(dt) {
+  // Spawn once the level-up banner has cleared (or immediately on game start).
+  if (walker.pendingSpawn && levelTransTimer <= 0) {
+    walker.active = true;
+    walker.x = -WALKER_W;
+    walker.frame = 0;
+    walker.pendingSpawn = false;
+  }
+  if (!walker.active) return;
+  const realDtMs = dt * TARGET_DT;
+  walker.x += (WALKER_SPEED * realDtMs) / 1000;
+  // Frame progresses with screen position — sprite sequence plays WALKER_LOOPS times across the crossing.
+  const travelDistance = CSS_W + WALKER_W;
+  const progress = Math.min(1, (walker.x + WALKER_W) / travelDistance);
+  const totalFrames = WALKER_FRAMES * WALKER_LOOPS;
+  const step = Math.min(totalFrames - 1, Math.floor(progress * totalFrames));
+  walker.frame = step % WALKER_FRAMES;
+  if (walker.x > CSS_W) walker.active = false;
+}
+
+function drawWalker() {
+  if (!walker.active) return;
+  const img = walkerImages[currentLevel];
+  if (!img || !img.complete || img.naturalWidth === 0) return;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(
+    img,
+    walker.frame * WALKER_SPRITE_W, 0, WALKER_SPRITE_W, WALKER_SPRITE_H,
+    walker.x, WALKER_FEET_Y - WALKER_H, WALKER_W, WALKER_H
+  );
 }
 
 // Load soccer ball from Figma asset
@@ -1408,14 +1486,21 @@ function drawSweetText() {
   ctx.globalAlpha = sweetText.alpha;
   ctx.translate(sweetText.x, sweetText.y);
   ctx.scale(sweetText.scale, sweetText.scale);
-  ctx.font = "22px 'Neue Pixel Grotesk', monospace";
-  ctx.fillStyle = "#00ff88";
+  ctx.font = "bold 28px 'Neue Pixel Grotesk', monospace";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = "#000";
+  ctx.strokeText(sweetText.text, 0, 0);
+  ctx.fillStyle = "#00ff88";
   ctx.fillText(sweetText.text, 0, 0);
   if (sweetStreak >= 3) {
-    ctx.font = "12px 'Neue Pixel Grotesk', monospace";
-    ctx.fillText(sweetStreak + "x STREAK", 0, 16);
+    ctx.font = "bold 14px 'Neue Pixel Grotesk', monospace";
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = "#000";
+    ctx.strokeText(sweetStreak + "x STREAK", 0, 18);
+    ctx.fillStyle = "#00ff88";
+    ctx.fillText(sweetStreak + "x STREAK", 0, 18);
   }
   ctx.restore();
 }
@@ -1445,7 +1530,10 @@ function update(timestamp) {
   ctx.translate(shakeX, shakeY);
 
   drawBackground();
-  drawMarquee(dt);
+  drawMarquee(state === "over" ? 0 : dt);
+  drawLevelForeground();
+  updateWalker(dt);
+  drawWalker();
 
   if (state === "start") {
     drawBall();
@@ -1519,9 +1607,7 @@ function update(timestamp) {
       }
     }
 
-    drawZone();
-
-    // Level-up banner (drawn behind ball and particles)
+    // Level-up banner (drawn BEHIND zone so green lines read on top)
     if (levelTransTimer > 0) {
       levelTransTimer -= dt;
       if (levelTransTimer > 0) {
@@ -1540,6 +1626,8 @@ function update(timestamp) {
         ctx.globalAlpha = 1;
       }
     }
+
+    drawZone();
 
     // Wind
     updateWind(dt);
