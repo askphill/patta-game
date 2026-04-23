@@ -619,7 +619,7 @@ const KICK_FORCE = -12;
 const BALL_SIZE = 24;
 const GROUND_Y = CSS_H - 40;
 
-// Hit zone: full-width rectangle, shrinks in height toward a 6px line
+// Hit zone: full-width rectangle, shrinks in height toward a 16px line
 const DEBUG_HARD_MODE = false; // SET TO true TO TEST ENDGAME DIFFICULTY
 const ZONE_CENTER_Y_BASE = CSS_H * 0.455;
 const ZONE_HEIGHT_START = DEBUG_HARD_MODE ? 10 : 400;
@@ -784,7 +784,7 @@ function updateZone(zoneDt) {
   var baseHeight = ZONE_HEIGHT_START - (ZONE_HEIGHT_START - ZONE_HEIGHT_FLOOR) * progress;
   // Keep shrinking slowly past score 100 — no plateau
   var endlessShrink = baseScore > ZONE_SHRINK_SCORE ? (baseScore - ZONE_SHRINK_SCORE) * ZONE_ENDLESS_SHRINK : 0;
-  zoneHeight = Math.max(6, baseHeight - endlessShrink);
+  zoneHeight = Math.max(16, baseHeight - endlessShrink);
 
   // Bob the zone — speed increases per level + gradual creep after score 60
   var extraSpeed = baseScore > 60 ? (baseScore - 60) * 0.0003 : 0;
@@ -982,7 +982,7 @@ canvas.addEventListener("mousedown", function (e) {
   kick();
 });
 
-// Draw the hit zone (full-width rectangle, shrinks to 4px line)
+// Draw the hit zone (full-width rectangle, shrinks to 16px line)
 let zonePulseTimer = 0;
 
 // Sweet spot — 10px strip in center of zone
