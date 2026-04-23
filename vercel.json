@@ -8,6 +8,15 @@
       "headers": [
         { "key": "Cache-Control", "value": "s-maxage=30, stale-while-revalidate=60" }
       ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors 'self' https://pattaxnike.com https://*.pattaxnike.com https://patta.nl https://*.patta.nl https://patta.co https://*.patta.co https://ng.patta.co https://pattaclothing.us https://*.pattaclothing.us"
+        }
+      ]
     }
   ]
 }
