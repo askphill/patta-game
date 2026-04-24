@@ -1,5 +1,9 @@
 import { redis } from '../lib/redis.js';
-import { getCachedTopTen, rebuildAndCacheTopTen } from '../lib/leaderboard.js';
+import {
+  rebuildAndCacheTopTen,
+  parseCachedTopTen,
+  TOP_TEN_CACHE_KEY,
+} from '../lib/leaderboard.js';
 import { containsProfanity } from '../lib/profanity.js';
 import { validateOrigin } from '../lib/origin.js';
 
@@ -39,66 +43,79 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Username not allowed, Patta got love for all' });
   }
 
-  // 4. Validate session
-  const sessionError = await validateSession(sessionId, baseScore || score);
+  // 4. Check username uniqueness (case-insensitive) before consuming the session
+  const emailLower = email.toLowerCase().trim();
+  const nameLower = name.trim().toLowerCase();
+  const usernameOwner = await redis.get(`username:${nameLower}`);
+  if (usernameOwner && usernameOwner !== emailLower) {
+    return res.status(400).json({ error: 'Username already taken' });
+  }
+
+  if (!sessionId) {
+    console.log('[REJECT] session', 'Missing session ID');
+    return res.status(403).json({ error: GENERIC_ERROR });
+  }
+
+  const clientIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
+
+  // 5. Consume session + bump rate limits in one round-trip
+  const gatePipe = redis.pipeline();
+  gatePipe.getdel(`session:${sessionId}`);
+  gatePipe.incr(`ratelimit:email:${emailLower}`);
+  gatePipe.expire(`ratelimit:email:${emailLower}`, 3600);
+  gatePipe.incr(`ratelimit:ip:${clientIp}`);
+  gatePipe.expire(`ratelimit:ip:${clientIp}`, 3600);
+  const [session, emailCount, , ipCount] = await gatePipe.exec();
+
+  if (emailCount > 10 || ipCount > 100) {
+    return res.status(429).json({ error: GENERIC_ERROR });
+  }
+  const sessionError = validateSession(session, baseScore || score);
   if (sessionError) {
     console.log('[REJECT] session', sessionError);
     return res.status(403).json({ error: GENERIC_ERROR });
   }
 
-  const emailLower = email.toLowerCase().trim();
-  const clientIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
-
-  // 5. Rate limit
-  const rateLimitError = await checkRateLimit(emailLower, clientIp);
-  if (rateLimitError) {
-    return res.status(429).json({ error: GENERIC_ERROR });
-  }
-
-  // 5. Write score (GT = only update if new score is higher)
-  await redis.zadd('leaderboard', { gt: true }, { score, member: emailLower });
-
-  // 6. Store/update player data
-  await redis.hset(`player:${emailLower}`, { name: name.trim(), email: emailLower, score });
+  // 6. Persist score, player data, and username claim in one round-trip
+  const writePipe = redis.pipeline();
+  writePipe.zadd('leaderboard', { gt: true }, { score, member: emailLower });
+  writePipe.hset(`player:${emailLower}`, { name: name.trim(), email: emailLower, score });
+  writePipe.set(`username:${nameLower}`, emailLower);
+  await writePipe.exec();
 
   // 7. Klaviyo call (fire-and-forget, don't block response)
   const klaviyoPromise = subscribeToKlaviyo(emailLower, name.trim(), score).catch((err) => {
     // Klaviyo error silently ignored
   });
 
-  // 8. Get user rank, then fetch top 10 (rebuild cache only if user is in top 10)
-  const userRank = await redis.zrevrank('leaderboard', emailLower);
+  // 8. Fetch rank + cached top 10 together; rebuild only if user landed in top 10
+  const readPipe = redis.pipeline();
+  readPipe.zrevrank('leaderboard', emailLower);
+  readPipe.get(TOP_TEN_CACHE_KEY);
+  const [userRank, cachedRaw] = await readPipe.exec();
   const rank = userRank !== null ? userRank + 1 : null;
 
+  const cachedTopTen = parseCachedTopTen(cachedRaw);
   const topTen = rank !== null && rank <= 10
     ? await rebuildAndCacheTopTen()
-    : await getCachedTopTen();
+    : cachedTopTen ?? await rebuildAndCacheTopTen();
 
-  // 9. Return response
-  // Send response immediately, let Klaviyo finish in background
+  // 9. Return response; let Klaviyo finish in background
   res.status(200).json({
     rank,
     topTen,
     userEntry: { rank, name: name.trim(), score },
   });
 
-  // Wait for Klaviyo to finish before function terminates
   await klaviyoPromise;
 }
 
-async function validateSession(sessionId, score) {
-  if (!sessionId) return 'Missing session ID';
-
-  // Atomic get-and-delete: prevents race condition where two requests use the same session
-  const session = await redis.getdel(`session:${sessionId}`);
+function validateSession(session, score) {
   if (!session) return 'Invalid or expired session';
-
   const elapsed = (Date.now() - session.startTime) / 1000;
   if (elapsed < 5) return 'Score submitted too quickly';
-
   // Plausibility: each kick cycle takes ~1 second minimum
   if (score > elapsed * 1.5) return 'Score not plausible for session duration';
-
   return null;
 }
 
@@ -144,26 +161,6 @@ function validateInputs(name, email, score, baseScore) {
   // Bonus can't exceed baseScore * 3 (sweet spot streaks + logo bonuses)
   if (baseScore && score - baseScore > baseScore * 3) return 'Invalid score';
 
-  return null;
-}
-
-async function checkRateLimit(email, ip) {
-  const emailKey = `ratelimit:email:${email}`;
-  const ipKey = `ratelimit:ip:${ip}`;
-
-  // Use pipeline for atomic incr + expire
-  const pipeline = redis.pipeline();
-  pipeline.incr(emailKey);
-  pipeline.expire(emailKey, 3600);
-  pipeline.incr(ipKey);
-  pipeline.expire(ipKey, 3600);
-  const results = await pipeline.exec();
-
-  const emailCount = results[0];
-  const ipCount = results[2];
-
-  if (emailCount > 10) return 'Too many submissions. Try again later.';
-  if (ipCount > 100) return 'Too many submissions from this network. Try again later.';
   return null;
 }
 
