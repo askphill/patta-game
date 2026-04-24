@@ -39,14 +39,21 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Username not allowed, Patta got love for all' });
   }
 
-  // 4. Validate session
+  // 4. Check username uniqueness (case-insensitive) before consuming the session
+  const emailLower = email.toLowerCase().trim();
+  const nameLower = name.trim().toLowerCase();
+  const usernameOwner = await redis.get(`username:${nameLower}`);
+  if (usernameOwner && usernameOwner !== emailLower) {
+    return res.status(400).json({ error: 'Username already taken' });
+  }
+
+  // 5. Validate session
   const sessionError = await validateSession(sessionId, baseScore || score);
   if (sessionError) {
     console.log('[REJECT] session', sessionError);
     return res.status(403).json({ error: GENERIC_ERROR });
   }
 
-  const emailLower = email.toLowerCase().trim();
   const clientIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
 
   // 5. Rate limit
@@ -58,8 +65,9 @@ export default async function handler(req, res) {
   // 5. Write score (GT = only update if new score is higher)
   await redis.zadd('leaderboard', { gt: true }, { score, member: emailLower });
 
-  // 6. Store/update player data
+  // 6. Store/update player data and claim the username
   await redis.hset(`player:${emailLower}`, { name: name.trim(), email: emailLower, score });
+  await redis.set(`username:${nameLower}`, emailLower);
 
   // 7. Klaviyo call (fire-and-forget, don't block response)
   const klaviyoPromise = subscribeToKlaviyo(emailLower, name.trim(), score).catch((err) => {
