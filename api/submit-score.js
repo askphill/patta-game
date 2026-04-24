@@ -83,10 +83,15 @@ export default async function handler(req, res) {
   writePipe.set(`username:${nameLower}`, emailLower);
   await writePipe.exec();
 
-  // 7. Klaviyo call (fire-and-forget, don't block response)
-  const klaviyoPromise = subscribeToKlaviyo(emailLower, name.trim(), score).catch((err) => {
-    // Klaviyo error silently ignored
-  });
+  // 7. Klaviyo call (awaited — simpler + reliable across local + prod)
+  const isoCountry = req.headers['x-vercel-ip-country'] || null;
+  const country = resolveCountryName(isoCountry);
+  console.log('[KLAVIYO] start', { email: emailLower, name: name.trim(), score, isoCountry, country });
+  try {
+    await subscribeToKlaviyo(emailLower, name.trim(), score, country);
+  } catch (err) {
+    console.error('[KLAVIYO] unexpected error', err);
+  }
 
   // 8. Fetch rank + cached top 10 together; rebuild only if user landed in top 10
   const readPipe = redis.pipeline();
@@ -164,14 +169,46 @@ function validateInputs(name, email, score, baseScore) {
   return null;
 }
 
-async function subscribeToKlaviyo(email, name, score) {
+async function checkRateLimit(email, ip) {
+  const emailKey = `ratelimit:email:${email}`;
+  const ipKey = `ratelimit:ip:${ip}`;
+
+  // Use pipeline for atomic incr + expire
+  const pipeline = redis.pipeline();
+  pipeline.incr(emailKey);
+  pipeline.expire(emailKey, 3600);
+  pipeline.incr(ipKey);
+  pipeline.expire(ipKey, 3600);
+  const results = await pipeline.exec();
+
+  const emailCount = results[0];
+  const ipCount = results[2];
+
+  if (emailCount > 10) return 'Too many submissions. Try again later.';
+  if (ipCount > 100) return 'Too many submissions from this network. Try again later.';
+  return null;
+}
+
+const regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
+
+function resolveCountryName(isoCode) {
+  if (!isoCode) return null;
+  try {
+    return regionNames.of(isoCode) || null;
+  } catch {
+    return null;
+  }
+}
+
+async function subscribeToKlaviyo(email, name, score, country) {
   const apiKey = process.env.KLAVIYO_API_KEY;
   const listId = process.env.KLAVIYO_LIST_ID;
   if (!apiKey || !listId) {
+    console.warn('[KLAVIYO] skipped — missing env', { hasApiKey: !!apiKey, hasListId: !!listId });
     return;
   }
 
-  const res = await fetch('https://a.klaviyo.com/api/profile-subscription-bulk-create-jobs/', {
+  const subRes = await fetch('https://a.klaviyo.com/api/profile-subscription-bulk-create-jobs/', {
     method: 'POST',
     headers: {
       'Authorization': `Klaviyo-API-Key ${apiKey}`,
@@ -208,6 +245,13 @@ async function subscribeToKlaviyo(email, name, score) {
     }),
   });
 
+  const subBody = await subRes.text();
+  if (!subRes.ok) {
+    console.error('[KLAVIYO] subscription failed', { status: subRes.status, body: subBody });
+  } else {
+    console.log('[KLAVIYO] subscription ok', { status: subRes.status, email, listId });
+  }
+
   // Update profile with custom properties (separate API call)
   const profileRes = await fetch('https://a.klaviyo.com/api/profile-import/', {
     method: 'POST',
@@ -221,6 +265,7 @@ async function subscribeToKlaviyo(email, name, score) {
         type: 'profile',
         attributes: {
           email,
+          ...(country && { location: { country } }),
           properties: {
             patta_game_username: name,
             patta_game_score: score,
@@ -230,4 +275,10 @@ async function subscribeToKlaviyo(email, name, score) {
     }),
   });
 
+  const profileBody = await profileRes.text();
+  if (!profileRes.ok) {
+    console.error('[KLAVIYO] profile-import failed', { status: profileRes.status, body: profileBody });
+  } else {
+    console.log('[KLAVIYO] profile-import ok', { status: profileRes.status, email, country });
+  }
 }
