@@ -24,12 +24,14 @@ function haptic(type, scoreIntensity) {
 const KICK_SOUND_SRCS = ["assets/kick-1.wav", "assets/kick-2.wav", "assets/kick-3.wav"];
 const BONUS_SOUND_SRCS = ["assets/bonus-hit.mp3"];
 const LEVEL_UP_SOUND_SRCS = ["assets/level-up.mp3"];
+const DEATH_SOUND_SRCS = ["assets/death.mp3"];
 const KICK_VOLUME = 0.35;
 const BONUS_VOLUME = 0.55;
 const LEVEL_UP_VOLUME = 0.6;
+const DEATH_VOLUME = 0.65;
 const AudioCtxCtor = window.AudioContext || window.webkitAudioContext;
 let audioCtx = null;
-const sfxBuffers = { kick: [], bonus: [], levelUp: [] };
+const sfxBuffers = { kick: [], bonus: [], levelUp: [], death: [] };
 let sfxLoading = false;
 
 function loadSfxBuffers() {
@@ -39,6 +41,7 @@ function loadSfxBuffers() {
     { key: "kick", srcs: KICK_SOUND_SRCS },
     { key: "bonus", srcs: BONUS_SOUND_SRCS },
     { key: "levelUp", srcs: LEVEL_UP_SOUND_SRCS },
+    { key: "death", srcs: DEATH_SOUND_SRCS },
   ];
   groups.forEach(({ key, srcs }) => {
     srcs.forEach((src, i) => {
@@ -78,6 +81,7 @@ function playSfx(group, volume) {
 function playKickSound() { playSfx("kick", KICK_VOLUME); }
 function playBonusSound() { playSfx("bonus", BONUS_VOLUME); }
 function playLevelUpSound() { playSfx("levelUp", LEVEL_UP_VOLUME); }
+function playDeathSound() { playSfx("death", DEATH_VOLUME); }
 
 // ── BACKGROUND MUSIC ──
 const bgMusic = new Audio("assets/music-victory-lap.mp3");
@@ -554,6 +558,7 @@ function showGameOver() {
   gameOverScore.textContent = score;
   splashPanel.classList.add("game-over");
   gameOverTime = Date.now();
+  playDeathSound();
 }
 
 function hideGameOver() {
