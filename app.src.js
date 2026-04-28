@@ -19,26 +19,34 @@ function haptic(type, scoreIntensity) {
   haptics.trigger(type, opts);
 }
 
-// ── KICK SOUND ──
+// ── SOUND EFFECTS ──
 // Web Audio API: decode once, polyphonic playback with no per-clip load lag.
 const KICK_SOUND_SRCS = ["assets/kick-1.wav", "assets/kick-2.wav", "assets/kick-3.wav"];
+const BONUS_SOUND_SRCS = ["assets/bonus-hit.mp3"];
 const KICK_VOLUME = 0.35;
+const BONUS_VOLUME = 0.55;
 const AudioCtxCtor = window.AudioContext || window.webkitAudioContext;
 let audioCtx = null;
-let kickBuffers = [];
-let kickBuffersLoading = false;
+const sfxBuffers = { kick: [], bonus: [] };
+let sfxLoading = false;
 
-function loadKickBuffers() {
-  if (kickBuffersLoading || kickBuffers.length || !audioCtx) return;
-  kickBuffersLoading = true;
-  KICK_SOUND_SRCS.forEach((src, i) => {
-    fetch(src)
-      .then((r) => r.arrayBuffer())
-      .then((buf) => audioCtx.decodeAudioData(buf))
-      .then((decoded) => {
-        kickBuffers[i] = decoded;
-      })
-      .catch(() => {});
+function loadSfxBuffers() {
+  if (sfxLoading || !audioCtx) return;
+  sfxLoading = true;
+  const groups = [
+    { key: "kick", srcs: KICK_SOUND_SRCS },
+    { key: "bonus", srcs: BONUS_SOUND_SRCS },
+  ];
+  groups.forEach(({ key, srcs }) => {
+    srcs.forEach((src, i) => {
+      fetch(src)
+        .then((r) => r.arrayBuffer())
+        .then((buf) => audioCtx.decodeAudioData(buf))
+        .then((decoded) => {
+          sfxBuffers[key][i] = decoded;
+        })
+        .catch(() => {});
+    });
   });
 }
 
@@ -47,21 +55,25 @@ function ensureAudio() {
   if (!AudioCtxCtor) return;
   if (!audioCtx) audioCtx = new AudioCtxCtor();
   if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
-  loadKickBuffers();
+  loadSfxBuffers();
 }
 
-function playKickSound() {
+function playSfx(group, volume) {
   ensureAudio();
-  if (!audioCtx || !kickBuffers.length) return;
-  const buf = kickBuffers[Math.floor(Math.random() * kickBuffers.length)];
+  const bank = sfxBuffers[group];
+  if (!audioCtx || !bank || !bank.length) return;
+  const buf = bank[Math.floor(Math.random() * bank.length)];
   if (!buf) return;
   const src = audioCtx.createBufferSource();
   src.buffer = buf;
   const gain = audioCtx.createGain();
-  gain.gain.value = KICK_VOLUME;
+  gain.gain.value = volume;
   src.connect(gain).connect(audioCtx.destination);
   src.start(0);
 }
+
+function playKickSound() { playSfx("kick", KICK_VOLUME); }
+function playBonusSound() { playSfx("bonus", BONUS_VOLUME); }
 
 // ── BACKGROUND MUSIC ──
 const bgMusic = new Audio("assets/music-victory-lap.mp3");
@@ -938,6 +950,7 @@ function kick() {
       scorePulse = 30; // trigger score animation
       screenShake = 6;
       spawnBonusParticles(ball.x, ball.y);
+      playBonusSound();
     }
 
     // Check sweet spot hit
