@@ -91,15 +91,22 @@ function playLevelUpSound() { playSfx("levelUp", LEVEL_UP_VOLUME); }
 function playDeathSound() { playSfx("death", DEATH_VOLUME); }
 
 // ── BACKGROUND MUSIC ──
-const bgMusic = new Audio("assets/music-victory-lap.mp3");
-bgMusic.loop = true;
-bgMusic.volume = 0.25;
-bgMusic.muted = muted;
-bgMusic.preload = "auto";
+// Lazy-init: don't fetch the 2MB MP3 until the user makes a gesture.
+// iOS Safari aggressively buffers Audio() with preload="auto", which
+// otherwise dominates first-load time on cellular.
+let bgMusic = null;
 let musicStarted = false;
+function ensureBgMusic() {
+  if (bgMusic) return bgMusic;
+  bgMusic = new Audio("assets/music-victory-lap.mp3");
+  bgMusic.loop = true;
+  bgMusic.volume = 0.25;
+  bgMusic.muted = muted;
+  return bgMusic;
+}
 function startMusic() {
   if (musicStarted) return;
-  bgMusic.play().then(() => { musicStarted = true; }).catch(() => {});
+  ensureBgMusic().play().then(() => { musicStarted = true; }).catch(() => {});
 }
 // Browsers block audio until a user gesture; start music on the first one.
 function primeOnFirstGesture() {
@@ -116,7 +123,7 @@ window.addEventListener("keydown", primeOnFirstGesture);
 const soundToggleBtn = document.querySelector(".sound-toggle");
 const soundToggleIcon = document.querySelector(".sound-toggle-icon");
 function applyMuteState() {
-  bgMusic.muted = muted;
+  if (bgMusic) bgMusic.muted = muted;
   if (soundToggleIcon) {
     soundToggleIcon.src = muted ? "assets/icon-sound-off.png" : "assets/icon-sound-on.png";
   }
