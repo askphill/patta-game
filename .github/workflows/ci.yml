@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run Vercel build (Terser minify app.js)
+        run: npm run vercel-build
+
+      - name: Syntax-check JS sources
+        run: |
+          node --check app.src.js
+          for f in api/*.js; do node --check "$f"; done
+
+      - name: Validate JSON
+        run: |
+          jq empty vercel.json
+          jq empty package.json
