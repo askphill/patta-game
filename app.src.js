@@ -63,6 +63,27 @@ function playKickSound() {
   src.start(0);
 }
 
+// ── BACKGROUND MUSIC ──
+const bgMusic = new Audio("assets/music-victory-lap.mp3");
+bgMusic.loop = true;
+bgMusic.volume = 0.25;
+bgMusic.preload = "auto";
+let musicStarted = false;
+function startMusic() {
+  if (musicStarted) return;
+  bgMusic.play().then(() => { musicStarted = true; }).catch(() => {});
+}
+// Browsers block audio until a user gesture; start music on the first one.
+function primeOnFirstGesture() {
+  startMusic();
+  if (musicStarted) {
+    window.removeEventListener("pointerdown", primeOnFirstGesture);
+    window.removeEventListener("keydown", primeOnFirstGesture);
+  }
+}
+window.addEventListener("pointerdown", primeOnFirstGesture);
+window.addEventListener("keydown", primeOnFirstGesture);
+
 // ── RETINA / HiDPI SUPPORT ──
 const DPR = window.devicePixelRatio || 1;
 const CSS_W = 403;
