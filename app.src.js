@@ -407,9 +407,6 @@ const ASSETS_TO_LOAD = [
   "assets/btn-leaderboard.png",
   "assets/soccer-ball.png",
   "assets/bg-level1.jpg",
-  "assets/bg-level2.jpg",
-  "assets/bg-level3.jpg",
-  "assets/bg-level4.jpg",
   "assets/key-space.png",
   "assets/btn-submit.png",
   "assets/patta-nike-marquee.png",
@@ -913,12 +910,16 @@ const LEVELS = [
   },
 ];
 
-// Preload level backgrounds
-LEVELS.forEach((lv) => {
+// Lazy-load level backgrounds. Only level 0 starts loading immediately;
+// higher levels load when the player approaches them, to keep first paint light.
+function ensureLevelBg(idx) {
+  const lv = LEVELS[idx];
+  if (!lv || lv.bgImg) return;
   const img = new Image();
   img.src = lv.bgSrc;
   lv.bgImg = img;
-});
+}
+ensureLevelBg(0);
 
 let currentLevel = 0;
 let levelTransition = false;
@@ -1203,6 +1204,11 @@ function kick() {
       screenShake = 14;
       spawnLevelUpParticles(ball.x, ball.y);
       playLevelUpSound();
+      // Pre-warm the asset cache for the level after this one so it's ready
+      // by the time the player crosses the next threshold.
+      ensureLevelBg(currentLevel + 1);
+      ensureWalkerImage(currentLevel);
+      ensureWalkerImage(currentLevel + 1);
       // Levels 2+ — walker crosses right after the banner clears
       if (walker.spawnedForLevel !== currentLevel) {
         walker.active = false;
@@ -1300,6 +1306,7 @@ function drawZone() {
 }
 
 function drawBackground() {
+  ensureLevelBg(currentLevel);
   const lv = LEVELS[currentLevel];
   const img = lv.bgImg;
 
@@ -1409,16 +1416,22 @@ const WALKER_FEET_Y = CSS_H - 80; // y of feet; above the score counter
 const WALKER_SPEED = 180;          // px/second — tweak to taste
 const WALKER_LOOPS = 2;            // number of times the sprite sequence plays across one crossing
 
-// Preload per-level sprite sheets. Missing files are fine — walker silently skips.
-const walkerImages = LEVELS.map((_, i) => {
+// Lazy-load per-level sprite sheets. Each ~140KB; only fetch when the level is
+// reached. Missing files are fine — walker silently skips.
+const walkerImages = LEVELS.map(() => null);
+function ensureWalkerImage(idx) {
+  if (idx < 0 || idx >= walkerImages.length) return;
+  if (walkerImages[idx]) return;
   const img = new Image();
-  img.src = `assets/walker-level${i + 1}.png`;
-  return img;
-});
+  img.src = `assets/walker-level${idx + 1}.png`;
+  walkerImages[idx] = img;
+}
+ensureWalkerImage(0);
 
 let walker = { active: false, x: 0, frame: 0, pendingSpawn: false, spawnedForLevel: -1 };
 
 function walkerDrawSize() {
+  ensureWalkerImage(currentLevel);
   const img = walkerImages[currentLevel];
   if (!img || !img.complete || img.naturalWidth === 0) return null;
   const cellW = img.naturalWidth / WALKER_COLS;
