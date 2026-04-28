@@ -1628,6 +1628,7 @@ function update(timestamp) {
   drawWalker();
 
   if (state === "start") {
+    drawZone();
     drawBall();
   }
 
