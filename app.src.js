@@ -156,6 +156,7 @@ const splashPanel = document.querySelector(".splash-panel");
 const menuButtons = document.querySelectorAll(".menu-btn");
 const menuFooter = document.querySelector(".menu-footer");
 const btnPlay = document.querySelector(".btn-play");
+const btnCollection = document.querySelector(".btn-collection");
 const gameOverOverlay = document.querySelector(".game-over-overlay");
 const gameOverScore = document.querySelector(".game-over-score");
 const btnSubmitScore = document.querySelector(".btn-submit-score");
@@ -653,6 +654,12 @@ btnPlay.addEventListener("click", (e) => {
 // Prevent other menu buttons from triggering skip
 document.querySelectorAll(".menu-btn").forEach((btn) => {
   btn.addEventListener("click", (e) => e.stopPropagation());
+});
+
+// Collection button → open Patta x Nike Mercurial Vapor 16 page
+btnCollection.addEventListener("click", (e) => {
+  e.stopPropagation();
+  window.open("https://patta.nl/pages/patta-x-nike-mercurial-vapor-16", "_blank", "noopener");
 });
 
 // Submit score button → show submission form
