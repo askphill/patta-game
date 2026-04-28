@@ -890,12 +890,16 @@ if (sessionStorage.getItem("patta-loaded")) {
   splashPanel.classList.add("menu-active");
   menuButtons.forEach((btn) => btn.classList.add("visible"));
   menuFooter.classList.add("visible");
-  // Animate panel scale + logo outward slide on next frame
+  // Animate panel scale + logo outward slide on next frame.
+  // Also kick off the secondary asset prefetch here — by the time rAF fires,
+  // module evaluation has finished and LEVELS / ensureWalkerImage exist.
+  // Calling prefetchSecondaryAssets synchronously here would hit the TDZ
+  // for the LEVELS const, abort module init, and leave rafId etc. uninitialized.
   requestAnimationFrame(() => {
     splashPanel.classList.add("visible");
     loadingRow.classList.add("splash-position");
+    prefetchSecondaryAssets();
   });
-  prefetchSecondaryAssets();
 } else {
   preloadAssets();
 }
