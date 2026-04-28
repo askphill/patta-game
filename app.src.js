@@ -551,8 +551,27 @@ function startPhase3() {
   }, 200);
 }
 
+// Warm the cache for assets that aren't needed for first paint but cause
+// visible flashes when the user navigates to them (leaderboard background,
+// later level backgrounds, walker sprites). Idempotent.
+let secondaryPrefetched = false;
+function prefetchSecondaryAssets() {
+  if (secondaryPrefetched) return;
+  secondaryPrefetched = true;
+  // Most likely next click — load first
+  const sky = new Image();
+  sky.src = "assets/bg-leaderboard-sky.jpg";
+  // Game progression assets — by the time the player reaches level 2 these
+  // should be in the browser cache.
+  for (let i = 1; i < LEVELS.length; i++) {
+    ensureLevelBg(i);
+    ensureWalkerImage(i);
+  }
+}
+
 function startPhase4() {
   sessionStorage.setItem("patta-loaded", "1");
+  prefetchSecondaryAssets();
 
   // Animate title from center to top
   splashPanel.classList.add("menu-active");
@@ -591,6 +610,7 @@ function skipToMenu() {
   // Show buttons immediately
   menuButtons.forEach((btn) => btn.classList.add("visible"));
   menuFooter.classList.add("visible");
+  prefetchSecondaryAssets();
 }
 
 overlay.addEventListener("click", (e) => {
@@ -875,6 +895,7 @@ if (sessionStorage.getItem("patta-loaded")) {
     splashPanel.classList.add("visible");
     loadingRow.classList.add("splash-position");
   });
+  prefetchSecondaryAssets();
 } else {
   preloadAssets();
 }
