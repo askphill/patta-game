@@ -36,7 +36,7 @@ export default async function handler(req, res) {
   // 2. Validate inputs (user-facing errors for fixable issues)
   const inputError = validateInputs(name, email, score, baseScore);
   if (inputError) {
-    console.log('[REJECT] input', inputError);
+    console.log('[REJECT] input', inputError, { score });
     return res.status(400).json({ error: inputError });
   }
 
