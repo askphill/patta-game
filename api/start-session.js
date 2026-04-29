@@ -8,7 +8,6 @@ export default async function handler(req, res) {
   }
   if (!validateOrigin(req, res)) return;
 
-  // IP-based rate limit: max 60 sessions per IP per hour
   const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
   const rateLimitKey = `ratelimit:session:${ip}`;
   const pipeline = redis.pipeline();
@@ -17,7 +16,7 @@ export default async function handler(req, res) {
   const results = await pipeline.exec();
   const count = results[0];
 
-  if (count > 200) {
+  if (count > 50) {
     console.log('[start-session 429]', JSON.stringify({
       ip,
       count,
