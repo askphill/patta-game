@@ -26,7 +26,10 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: inputError });
   }
 
-  const cleanFirstName = firstName.trim();
+  const cleanFirstName = firstName
+    .trim()
+    .toLowerCase()
+    .replace(/(^|[\s-])([a-z])/g, (_, sep, ch) => sep + ch.toUpperCase());
   const emailLower = email.toLowerCase().trim();
 
   // 3. Rate limit (per email + per IP, 1-hour window)
@@ -46,7 +49,7 @@ export default async function handler(req, res) {
   const country = resolveCountryName(isoCountry);
   console.log('[KLAVIYO] subscribe start', { email: emailLower, firstName: cleanFirstName, country });
   waitUntil(
-    subscribeToKlaviyo(emailLower, { name: cleanFirstName, country })
+    subscribeToKlaviyo(emailLower, { firstName: cleanFirstName, country })
       .catch((err) => console.error('[KLAVIYO] subscribe error', err))
   );
 
