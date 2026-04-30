@@ -16,13 +16,7 @@ export default async function handler(req, res) {
   if (!validateOrigin(req, res)) return;
 
   const GENERIC_ERROR = 'Submission failed. Please try again.';
-  const { name, email, _v: score, _b: baseScore, _s: sig, sessionId, turnstileToken } = req.body;
-
-  // Verify payload signature
-  if (!verifySignature(name, email, score, sessionId, sig)) {
-    console.log('[REJECT] signature', { name, score, sessionId, sig });
-    return res.status(403).json({ error: GENERIC_ERROR });
-  }
+  const { name, email, _v: score, _b: baseScore, sessionId, turnstileToken } = req.body;
 
   const clientIpForTurnstile = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
 
@@ -148,16 +142,6 @@ async function verifyTurnstile(token, ip) {
 
   if (!data.success) return 'Bot verification failed';
   return null;
-}
-
-function verifySignature(name, email, score, sessionId, sig) {
-  if (!sig || !sessionId || score === undefined) return false;
-  var key = sessionId + ':' + score + ':' + name.length;
-  var hash = 0;
-  for (var i = 0; i < key.length; i++) {
-    hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
-  }
-  return hash.toString(36) === sig;
 }
 
 function validateInputs(name, email, score, baseScore) {
