@@ -75,18 +75,36 @@ export default async function handler(req, res) {
     }));
     return res.status(429).json({ error: GENERIC_ERROR });
   }
-  const sessionError = validateSession(session, baseScore || score);
-  if (sessionError) {
-    console.log('[REJECT] session', sessionError);
+  const sessionCheck = validateSession(session, baseScore || score);
+  if (sessionCheck.error) {
+    console.log('[REJECT] session', sessionCheck.error);
     return res.status(403).json({ error: GENERIC_ERROR });
   }
+  const elapsedSeconds = sessionCheck.elapsed;
 
-  // 6. Persist score, player data, and username claim in one round-trip
+  // 6. Persist score, player data, and username claim in one round-trip.
+  // baseScore + elapsedSeconds are stored for forensic auditing of suspicious
+  // top scores; they don't affect the leaderboard ranking.
   const writePipe = redis.pipeline();
   writePipe.zadd('leaderboard', { gt: true }, { score, member: emailLower });
-  writePipe.hset(`player:${emailLower}`, { name: name.trim(), email: emailLower, score });
+  writePipe.hset(`player:${emailLower}`, {
+    name: name.trim(),
+    email: emailLower,
+    score,
+    baseScore: baseScore ?? null,
+    elapsedSeconds: Math.round(elapsedSeconds),
+  });
   writePipe.set(`username:${nameLower}`, emailLower);
   await writePipe.exec();
+
+  console.log('[ACCEPTED]', JSON.stringify({
+    email: emailLower,
+    name: name.trim(),
+    score,
+    baseScore: baseScore ?? null,
+    elapsedSeconds: Math.round(elapsedSeconds),
+    bonusRatio: baseScore ? +((score - baseScore) / baseScore).toFixed(2) : null,
+  }));
 
   // 7. Klaviyo call — deferred via waitUntil so the response returns immediately
   const isoCountry = req.headers['x-vercel-ip-country'] || null;
@@ -118,12 +136,12 @@ export default async function handler(req, res) {
 }
 
 function validateSession(session, score) {
-  if (!session) return 'Invalid or expired session';
+  if (!session) return { error: 'Invalid or expired session' };
   const elapsed = (Date.now() - session.startTime) / 1000;
-  if (elapsed < 5) return 'Score submitted too quickly';
+  if (elapsed < 5) return { error: 'Score submitted too quickly', elapsed };
   // Plausibility: each kick cycle takes ~1 second minimum
-  if (score > elapsed * 1.5) return 'Score not plausible for session duration';
-  return null;
+  if (score > elapsed * 1.5) return { error: 'Score not plausible for session duration', elapsed };
+  return { error: null, elapsed };
 }
 
 async function verifyTurnstile(token, ip) {
