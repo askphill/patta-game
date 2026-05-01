@@ -1343,6 +1343,56 @@ canvas.active {
   filter: brightness(1.2);
 }
 
+.btn-share {
+  border: none;
+  border-top: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  border-radius: 11px;
+  background: #0051e8;
+  color: #fff;
+  font-family: "Neue Pixel Grotesk", monospace;
+  font-size: 14px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+  height: 28px;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: filter 0.15s var(--ease-out-cubic), transform 0.15s var(--ease-out-cubic);
+}
+
+.btn-share:hover {
+  filter: brightness(1.2);
+}
+
+.btn-share:active {
+  transform: translateY(1px) scale(0.98);
+  filter: brightness(0.92);
+}
+
+.btn-share[disabled] {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.btn-share-leaderboard {
+  position: sticky;
+  bottom: 24px;
+  align-self: center;
+  margin-top: 16px;
+  margin-bottom: 24px;
+  z-index: 3;
+}
+
+/* The HTML `hidden` attribute is overridden by `.btn-share`'s
+   `display: inline-flex`, so re-assert display:none here. */
+.btn-share[hidden] {
+  display: none;
+}
+
 /* Sound toggle — square, casual, warm off-white. Bottom-right of the viewport.
    Subtle wiggle animation draws attention without being intrusive. */
 .sound-toggle {

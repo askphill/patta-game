@@ -170,6 +170,7 @@ const btnCollection = document.querySelector(".btn-collection");
 const gameOverOverlay = document.querySelector(".game-over-overlay");
 const gameOverScore = document.querySelector(".game-over-score");
 const btnSubmitScore = document.querySelector(".btn-submit-score");
+const btnShareLeaderboard = document.querySelector(".btn-share-leaderboard");
 
 // ── LEADERBOARD & SUBMISSION ──
 // Replace with your Cloudflare Turnstile site key
@@ -337,6 +338,13 @@ scoreSubmitForm.addEventListener("submit", async (e) => {
     // Reset the form so Safari doesn't show the "unsaved changes" beforeunload prompt
     scoreSubmitForm.reset();
 
+    // Reveal the leaderboard share button — we now have a fresh score
+    // (and possibly a rank) to share.
+    lastSharedRank = data.userEntry && data.userEntry.rank;
+    lastSharedScore = data.userEntry && data.userEntry.score;
+    lastSharedName = data.userEntry && data.userEntry.name;
+    if (btnShareLeaderboard) btnShareLeaderboard.hidden = false;
+
     // Show leaderboard with user highlight
     showLeaderboard(data.topTen, data.userEntry);
   } catch (err) {
@@ -422,6 +430,153 @@ function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
   return div.innerHTML;
+}
+
+// ── INSTAGRAM STORY SHARE CARD ──
+// Generates a 1080x1920 image (Story aspect) with the player's score, optional
+// rank, branding + CTA, then hands it to navigator.share so the system sheet
+// can route it to Instagram → Stories. Falls back to download on desktop.
+const SHARE_CARD_W = 1080;
+const SHARE_CARD_H = 1920;
+const SHARE_CTA_URL = "PATTAXNIKE.COM";
+
+let lastSharedRank = null;
+let lastSharedScore = null;
+let lastSharedName = null;
+
+function loadShareImage(src) {
+  return new Promise(function (resolve, reject) {
+    var img = new Image();
+    img.onload = function () { resolve(img); };
+    img.onerror = function () { reject(new Error("Failed to load " + src)); };
+    img.src = src;
+  });
+}
+
+async function generateShareCard(scoreVal, rankVal, nameVal) {
+  // Make sure the pixel font is rasterised at the sizes we need before drawing.
+  if (document.fonts && document.fonts.load) {
+    try {
+      await Promise.all([
+        document.fonts.load("400 320px 'Neue Pixel Grotesk'"),
+        document.fonts.load("400 60px 'Neue Pixel Grotesk'"),
+        document.fonts.load("400 44px 'Neue Pixel Grotesk'"),
+      ]);
+    } catch (e) {}
+  }
+
+  var imgs = await Promise.all([
+    loadShareImage("assets/bg-score-submit.jpg"),
+    loadShareImage("assets/leaderboard-title.png"),
+    loadShareImage("assets/patta-logo.png"),
+    loadShareImage("assets/nike-swoosh.png"),
+  ]);
+  var bg = imgs[0], titleImg = imgs[1], pattaLogo = imgs[2], nikeSwoosh = imgs[3];
+
+  var card = document.createElement("canvas");
+  card.width = SHARE_CARD_W;
+  card.height = SHARE_CARD_H;
+  var c = card.getContext("2d");
+
+  // Background — cover-fit
+  var scale = Math.max(SHARE_CARD_W / bg.width, SHARE_CARD_H / bg.height);
+  var bgW = bg.width * scale;
+  var bgH = bg.height * scale;
+  c.drawImage(bg, (SHARE_CARD_W - bgW) / 2, (SHARE_CARD_H - bgH) / 2, bgW, bgH);
+
+  // Tournament title at top
+  var titleW = 820;
+  var titleH = titleImg.height * (titleW / titleImg.width);
+  c.drawImage(titleImg, (SHARE_CARD_W - titleW) / 2, 180, titleW, titleH);
+
+  c.fillStyle = "#fff";
+  c.textAlign = "center";
+  c.textBaseline = "alphabetic";
+
+  // "{NAME}'S SCORE" label — falls back to "YOUR SCORE" when we don't
+  // have a name on hand (defensive; in practice we always do).
+  var label = nameVal
+    ? String(nameVal).toUpperCase() + "'S SCORE"
+    : "YOUR SCORE";
+  c.font = "60px 'Neue Pixel Grotesk', monospace";
+  c.fillText(label, SHARE_CARD_W / 2, 720);
+
+  // Score (huge)
+  c.font = "320px 'Neue Pixel Grotesk', monospace";
+  c.fillText(String(scoreVal), SHARE_CARD_W / 2, 1080);
+
+  // Rank badge — only shown when the player actually placed
+  if (rankVal) {
+    c.font = "70px 'Neue Pixel Grotesk', monospace";
+    c.fillText("RANKED #" + rankVal, SHARE_CARD_W / 2, 1240);
+  }
+
+  // Subtle URL-only CTA (this is a shoe-release activation, not a
+  // game-replay prompt — the brand logos already do the heavy lifting).
+  c.font = "44px 'Neue Pixel Grotesk', monospace";
+  c.fillText(SHARE_CTA_URL, SHARE_CARD_W / 2, 1700);
+
+  // Bottom logos
+  var logoH = 90;
+  var pattaW = pattaLogo.width * (logoH / pattaLogo.height);
+  var nikeW = nikeSwoosh.width * (logoH / nikeSwoosh.height);
+  var gap = 64;
+  var startX = (SHARE_CARD_W - (pattaW + gap + nikeW)) / 2;
+  var logoY = 1790;
+  c.drawImage(pattaLogo, startX, logoY, pattaW, logoH);
+  c.drawImage(nikeSwoosh, startX + pattaW + gap, logoY, nikeW, logoH);
+
+  return new Promise(function (resolve, reject) {
+    card.toBlob(function (blob) {
+      if (blob) resolve(blob);
+      else reject(new Error("toBlob returned null"));
+    }, "image/jpeg", 0.92);
+  });
+}
+
+async function shareScoreCard(button, scoreVal, rankVal, nameVal) {
+  if (!button || button.disabled) return;
+  button.disabled = true;
+  try {
+    var blob = await generateShareCard(scoreVal, rankVal, nameVal);
+    var file = new File([blob], "patta-score.jpg", { type: "image/jpeg" });
+    // Only pass the file — adding text/title makes iOS "Copy" duplicate
+    // content (image + text preview) on paste, and Instagram Stories
+    // ignores text anyway.
+    var shareData = { files: [file] };
+
+    if (navigator.canShare && navigator.canShare(shareData) && navigator.share) {
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch (err) {
+        if (err && err.name === "AbortError") return;
+        // Other share errors fall through to download
+      }
+    }
+
+    // Fallback: trigger a download so the user can manually post the image.
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "patta-score.jpg";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  } catch (e) {
+    // Surfacing failure silently is fine here — the button just re-enables.
+  } finally {
+    button.disabled = false;
+  }
+}
+
+if (btnShareLeaderboard) {
+  btnShareLeaderboard.addEventListener("click", function (e) {
+    e.stopPropagation();
+    var s = lastSharedScore != null ? lastSharedScore : score;
+    shareScoreCard(btnShareLeaderboard, s, lastSharedRank, lastSharedName);
+  });
 }
 
 const ASSETS_TO_LOAD = [
@@ -750,6 +905,25 @@ btnLeaderboard.addEventListener("click", async (e) => {
   overlay.classList.add("leaderboard-bg-active");
   leaderboardOverlay.scrollTop = 0;
 
+  var storedEntry = null;
+  try {
+    storedEntry = JSON.parse(localStorage.getItem("patta_game_entry"));
+  } catch (e) {}
+
+  // Browsing the leaderboard from the menu — show the share button only
+  // when a prior submission is in localStorage, so we have a real score
+  // (and name) to render onto the card.
+  if (btnShareLeaderboard) {
+    if (storedEntry && storedEntry.score) {
+      lastSharedScore = storedEntry.score;
+      lastSharedRank = storedEntry.rank || null;
+      lastSharedName = storedEntry.name || null;
+      btnShareLeaderboard.hidden = false;
+    } else {
+      btnShareLeaderboard.hidden = true;
+    }
+  }
+
   // Don't re-fetch if already loaded
   if (leaderboardLoaded) {
     setTimeout(updateLeaderboardGradient, 300);
@@ -757,11 +931,6 @@ btnLeaderboard.addEventListener("click", async (e) => {
   }
 
   leaderboardRows.innerHTML = leaderboardHeader + '<div class="leaderboard-loading">LOADING...</div>';
-
-  var storedEntry = null;
-  try {
-    storedEntry = JSON.parse(localStorage.getItem("patta_game_entry"));
-  } catch (e) {}
 
   try {
     const res = await fetch("/api/leaderboard");
