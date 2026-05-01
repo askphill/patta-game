@@ -90,7 +90,15 @@ export default async function handler(req, res) {
   // 7. Validate decoded score values
   const scoreError = validateScores(score, baseScore);
   if (scoreError) {
-    console.log('[REJECT] input', scoreError, { score });
+    console.log('[REJECT] input', JSON.stringify({
+      error: scoreError,
+      score,
+      baseScore,
+      name: name?.trim(),
+      email: emailLower,
+      ip: clientIp,
+      ua: req.headers['user-agent'] || null,
+    }));
     return res.status(400).json({ error: scoreError });
   }
 
