@@ -22,7 +22,10 @@ function haptic(type, scoreIntensity) {
 // ── MUTE STATE ──
 // Persisted across sessions. Gates both SFX and background music.
 let muted = (() => {
-  try { return localStorage.getItem("muted") === "1"; } catch { return false; }
+  try {
+    const stored = localStorage.getItem("muted");
+    return stored === null ? true : stored === "1";
+  } catch { return true; }
 })();
 
 // ── SOUND EFFECTS ──
@@ -108,13 +111,12 @@ function startMusic() {
   if (musicStarted) return;
   ensureBgMusic().play().then(() => { musicStarted = true; }).catch(() => {});
 }
-// Browsers block audio until a user gesture; start music on the first one.
+// Browsers block audio until a user gesture; unlock the AudioContext on the first one,
+// but don't start music automatically — it only starts when the user presses Play.
 function primeOnFirstGesture() {
-  startMusic();
-  if (musicStarted) {
-    window.removeEventListener("pointerdown", primeOnFirstGesture);
-    window.removeEventListener("keydown", primeOnFirstGesture);
-  }
+  ensureAudio();
+  window.removeEventListener("pointerdown", primeOnFirstGesture);
+  window.removeEventListener("keydown", primeOnFirstGesture);
 }
 window.addEventListener("pointerdown", primeOnFirstGesture);
 window.addEventListener("keydown", primeOnFirstGesture);
@@ -136,6 +138,7 @@ function setMuted(next) {
   muted = !!next;
   try { localStorage.setItem("muted", muted ? "1" : "0"); } catch {}
   applyMuteState();
+  if (!muted) startMusic();
 }
 applyMuteState();
 if (soundToggleBtn) {
@@ -663,6 +666,7 @@ window.onTurnstileLoad = function() {
 
 function startGame() {
   startSession();
+  startMusic();
   // Show canvas + start overlay inside the panel, hide menu content
   splashPanel.classList.add("game-active");
   canvas.classList.add("active");
