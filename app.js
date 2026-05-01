@@ -193,6 +193,19 @@ const btnSubscribeSubmit = document.querySelector(".btn-subscribe-submit");
 const btnBackSubscribe = document.querySelector(".btn-back-subscribe");
 
 let currentSessionId = null;
+let currentSessionSecret = null;
+
+function encodeScores(score, baseScore, secret) {
+  const buf = new Uint8Array(8);
+  buf[0] = (score >>> 24) & 0xff; buf[1] = (score >>> 16) & 0xff;
+  buf[2] = (score >>> 8) & 0xff;  buf[3] = score & 0xff;
+  buf[4] = (baseScore >>> 24) & 0xff; buf[5] = (baseScore >>> 16) & 0xff;
+  buf[6] = (baseScore >>> 8) & 0xff;  buf[7] = baseScore & 0xff;
+  for (var i = 0; i < 8; i++) {
+    buf[i] ^= parseInt(secret.slice((i % 8) * 2, (i % 8) * 2 + 2), 16);
+  }
+  return Array.from(buf).map(b => b.toString(16).padStart(2, '0')).join('');
+}
 let turnstileToken = null;
 let turnstileWidgetId = null;
 let turnstileSubscribeToken = null;
@@ -216,8 +229,10 @@ async function startSession() {
     const res = await fetch("/api/start-session", { method: "POST" });
     const data = await res.json();
     currentSessionId = data.sessionId;
+    currentSessionSecret = data.secret;
   } catch (e) {
     currentSessionId = null;
+    currentSessionSecret = null;
   }
 }
 
@@ -292,12 +307,11 @@ scoreSubmitForm.addEventListener("submit", async (e) => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name,
-        email,
-        _v: score,
-        _b: baseScore,
-        sessionId: currentSessionId,
-        turnstileToken,
+        n: name,
+        e: email,
+        _s: encodeScores(score, baseScore, currentSessionSecret),
+        sid: currentSessionId,
+        t: turnstileToken,
       }),
     });
 
