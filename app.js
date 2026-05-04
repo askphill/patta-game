@@ -173,9 +173,6 @@ const btnSubmitScore = document.querySelector(".btn-submit-score");
 const btnShareLeaderboard = document.querySelector(".btn-share-leaderboard");
 
 // ── LEADERBOARD & SUBMISSION ──
-// Replace with your Cloudflare Turnstile site key
-const TURNSTILE_SITE_KEY = "0x4AAAAAAC9ZjGD-cgxoZ_Qv";
-
 const scoreSubmitOverlay = document.querySelector(".score-submit-overlay");
 const scoreSubmitScore = document.querySelector(".score-submit-score");
 const scoreSubmitForm = document.querySelector(".score-submit-form");
@@ -207,24 +204,6 @@ function encodeScores(score, baseScore, secret) {
   }
   return Array.from(buf).map(b => b.toString(16).padStart(2, '0')).join('');
 }
-let turnstileToken = null;
-let turnstileWidgetId = null;
-let turnstileSubscribeToken = null;
-let turnstileSubscribeWidgetId = null;
-
-// Lazy-load the Turnstile script — it's a third-party origin (~30KB + DNS/TLS),
-// only needed when the user opens the score-submit or subscribe form.
-let turnstileScriptInjected = false;
-function loadTurnstile() {
-  if (turnstileScriptInjected) return;
-  turnstileScriptInjected = true;
-  const s = document.createElement("script");
-  s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad";
-  s.async = true;
-  s.defer = true;
-  document.head.appendChild(s);
-}
-
 async function startSession() {
   try {
     const res = await fetch("/api/start-session", { method: "POST" });
@@ -255,13 +234,6 @@ function showScoreSubmit() {
 
   splashPanel.classList.remove("game-over");
   splashPanel.classList.add("score-submit-active");
-
-  loadTurnstile();
-  // Reset Turnstile for a fresh token if already initialized
-  if (window.turnstile && turnstileWidgetId) {
-    turnstile.reset(turnstileWidgetId);
-    turnstileToken = null;
-  }
 }
 
 // Clear error when user edits the form
@@ -269,19 +241,11 @@ scoreSubmitForm.addEventListener("input", () => {
   scoreSubmitError.textContent = "";
 });
 
+
 scoreSubmitForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   scoreSubmitError.textContent = "";
   btnContinue.disabled = true;
-
-  // Wait for Turnstile to load + issue a token (max 5 seconds).
-  // Script is lazy-loaded when the form opens, so it may still be in flight here.
-  if (!turnstileToken) {
-    for (var i = 0; i < 25; i++) {
-      await new Promise(function(r) { setTimeout(r, 200); });
-      if (turnstileToken) break;
-    }
-  }
 
   const formData = new FormData(scoreSubmitForm);
   const name = (formData.get("name") || "").trim();
@@ -312,7 +276,6 @@ scoreSubmitForm.addEventListener("submit", async (e) => {
         e: email,
         _s: encodeScores(score, baseScore, currentSessionSecret),
         sid: currentSessionId,
-        t: turnstileToken,
       }),
     });
 
@@ -323,11 +286,6 @@ scoreSubmitForm.addEventListener("submit", async (e) => {
         data.error || "SUBMISSION FAILED"
       ).toUpperCase();
       btnContinue.disabled = false;
-      // Reset Turnstile for retry
-      if (window.turnstile && turnstileWidgetId) {
-        turnstile.reset(turnstileWidgetId);
-        turnstileToken = null;
-      }
       return;
     }
 
@@ -869,29 +827,6 @@ function hideGameOver() {
   splashPanel.classList.remove("game-over");
 }
 
-// Turnstile calls this global callback when the script finishes loading
-window.onTurnstileLoad = function() {
-  turnstileWidgetId = turnstile.render('#turnstile-container', {
-    sitekey: TURNSTILE_SITE_KEY,
-    callback: function(token) {
-      turnstileToken = token;
-    },
-    'error-callback': function() {
-      turnstileToken = null;
-    },
-    size: 'invisible',
-  });
-  turnstileSubscribeWidgetId = turnstile.render('#turnstile-subscribe-container', {
-    sitekey: TURNSTILE_SITE_KEY,
-    callback: function(token) {
-      turnstileSubscribeToken = token;
-    },
-    'error-callback': function() {
-      turnstileSubscribeToken = null;
-    },
-    size: 'invisible',
-  });
-};
 
 function startGame() {
   startSession();
@@ -1014,12 +949,6 @@ function showSubscribe() {
   emailInput.value = savedEmail || "";
 
   splashPanel.classList.add("subscribe-active");
-
-  loadTurnstile();
-  if (window.turnstile && turnstileSubscribeWidgetId) {
-    turnstile.reset(turnstileSubscribeWidgetId);
-    turnstileSubscribeToken = null;
-  }
 }
 
 function hideSubscribe() {
@@ -1045,14 +974,6 @@ subscribeForm.addEventListener("submit", async (e) => {
   subscribeError.textContent = "";
   btnSubscribeSubmit.disabled = true;
 
-  // Wait for Turnstile to load + issue a token (max 5 seconds).
-  if (!turnstileSubscribeToken) {
-    for (var i = 0; i < 25; i++) {
-      await new Promise(function(r) { setTimeout(r, 200); });
-      if (turnstileSubscribeToken) break;
-    }
-  }
-
   var formData = new FormData(subscribeForm);
   var firstName = (formData.get("firstName") || "").trim();
   var email = (formData.get("email") || "").trim();
@@ -1075,21 +996,13 @@ subscribeForm.addEventListener("submit", async (e) => {
     const res = await fetch("/api/subscribe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        firstName,
-        email,
-        turnstileToken: turnstileSubscribeToken,
-      }),
+      body: JSON.stringify({ firstName, email }),
     });
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
       subscribeError.textContent = (data.error || "SUBSCRIPTION FAILED").toUpperCase();
       btnSubscribeSubmit.disabled = false;
-      if (window.turnstile && turnstileSubscribeWidgetId) {
-        turnstile.reset(turnstileSubscribeWidgetId);
-        turnstileSubscribeToken = null;
-      }
       return;
     }
 
