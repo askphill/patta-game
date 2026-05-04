@@ -133,7 +133,7 @@ export default async function handler(req, res) {
       .catch((err) => console.error('[KLAVIYO] unexpected error', err))
   );
 
-  // 9. Fetch rank, cached top 10, and actual stored score in one round-trip, cached top 10, and actual stored score in one round-trip
+  // 9. Fetch rank, cached top 20, and actual stored score in one round-trip
   const readPipe = redis.pipeline();
   readPipe.zrevrank('leaderboard', emailLower);
   readPipe.get(TOP_TEN_CACHE_KEY);
@@ -143,7 +143,7 @@ export default async function handler(req, res) {
   const bestScore = storedScore !== null ? Number(storedScore) : score;
 
   const cachedTopTen = parseCachedTopTen(cachedRaw);
-  const topTen = rank !== null && rank <= 10
+  const topTen = rank !== null && rank <= 20
     ? await rebuildAndCacheTopTen()
     : cachedTopTen ?? await rebuildAndCacheTopTen();
 
