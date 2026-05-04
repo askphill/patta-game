@@ -10,30 +10,11 @@ export default async function handler(req, res) {
   if (!validateOrigin(req, res)) return;
 
   const GENERIC_ERROR = 'Subscription failed. Please try again.';
-  const { firstName, email, turnstileToken } = req.body || {};
+  const { firstName, email } = req.body || {};
 
-  // 1. Verify Turnstile token
   const clientIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
-  const turnstileError = await verifyTurnstile(turnstileToken, clientIp);
-  if (turnstileError) {
-    const emailRaw = typeof email === 'string' ? email.toLowerCase().trim() : '';
-    const firstNameRaw = typeof firstName === 'string' ? firstName.trim() : '';
-    const hasValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw);
-    console.log('[REJECT] subscribe turnstile', turnstileError, JSON.stringify({
-      klaviyo: hasValidEmail ? 'queued' : 'skipped',
-      email: emailRaw || null,
-    }));
-    if (hasValidEmail) {
-      const isoCountry = req.headers['x-vercel-ip-country'] || null;
-      waitUntil(
-        subscribeToKlaviyo(emailRaw, { firstName: firstNameRaw, country: resolveCountryName(isoCountry) })
-          .catch((err) => console.error('[KLAVIYO] subscribe turnstile-reject error', err))
-      );
-    }
-    return res.status(403).json({ error: GENERIC_ERROR });
-  }
 
-  // 2. Validate inputs (user-facing)
+  // 1. Validate inputs (user-facing)
   const inputError = validateInputs(firstName, email);
   if (inputError) {
     return res.status(400).json({ error: inputError });
@@ -45,7 +26,7 @@ export default async function handler(req, res) {
     .replace(/(^|[\s-])([a-z])/g, (_, sep, ch) => sep + ch.toUpperCase());
   const emailLower = email.toLowerCase().trim();
 
-  // 3. Rate limit (per email + per IP, 1-hour window)
+  // 2. Rate limit (per email + per IP, 1-hour window)
   const rlPipe = redis.pipeline();
   rlPipe.incr(`ratelimit:subscribe:email:${emailLower}`);
   rlPipe.expire(`ratelimit:subscribe:email:${emailLower}`, 3600);
@@ -57,7 +38,7 @@ export default async function handler(req, res) {
     return res.status(429).json({ error: GENERIC_ERROR });
   }
 
-  // 4. Klaviyo — deferred so the response returns immediately
+  // 3. Klaviyo — deferred so the response returns immediately
   const isoCountry = req.headers['x-vercel-ip-country'] || null;
   const country = resolveCountryName(isoCountry);
   console.log('[KLAVIYO] subscribe start', { email: emailLower, firstName: cleanFirstName, country });
@@ -67,23 +48,6 @@ export default async function handler(req, res) {
   );
 
   return res.status(200).json({ ok: true });
-}
-
-async function verifyTurnstile(token, ip) {
-  if (!token) return 'Missing Turnstile token';
-
-  const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      secret: process.env.TURNSTILE_SECRET_KEY,
-      response: token,
-      remoteip: ip,
-    }),
-  });
-  const data = await res.json();
-  if (!data.success) return 'Bot verification failed';
-  return null;
 }
 
 function validateInputs(firstName, email) {

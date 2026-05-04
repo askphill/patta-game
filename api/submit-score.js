@@ -16,31 +16,9 @@ export default async function handler(req, res) {
   if (!validateOrigin(req, res)) return;
 
   const GENERIC_ERROR = 'Submission failed. Please try again.';
-  const { n: name, e: email, _s: encoded, sid: sessionId, t: turnstileToken } = req.body;
+  const { n: name, e: email, _s: encoded, sid: sessionId } = req.body;
 
-  const clientIpForTurnstile = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-
-  // 1. Verify Turnstile token
-  const turnstileError = await verifyTurnstile(turnstileToken, clientIpForTurnstile);
-  if (turnstileError) {
-    const emailRaw = typeof email === 'string' ? email.toLowerCase().trim() : '';
-    const nameRaw = typeof name === 'string' ? name.trim() : '';
-    const hasValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw);
-    console.log('[REJECT] turnstile', turnstileError, JSON.stringify({
-      klaviyo: hasValidEmail ? 'queued' : 'skipped',
-      email: emailRaw || null,
-    }));
-    if (hasValidEmail) {
-      const isoCountry = req.headers['x-vercel-ip-country'] || null;
-      waitUntil(
-        subscribeToKlaviyo(emailRaw, { username: nameRaw, country: resolveCountryName(isoCountry) })
-          .catch((err) => console.error('[KLAVIYO] turnstile-reject error', err))
-      );
-    }
-    return res.status(403).json({ error: GENERIC_ERROR });
-  }
-
-  // 2. Validate name + email (score comes after session decode)
+  // 1. Validate name + email (score comes after session decode)
   const identityError = validateIdentity(name, email);
   if (identityError) {
     return res.status(400).json({ error: identityError });
@@ -66,7 +44,7 @@ export default async function handler(req, res) {
 
   const clientIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
 
-  // 5. Consume session + bump rate limits in one round-trip
+  // 4. Consume session + bump rate limits in one round-trip
   const gatePipe = redis.pipeline();
   gatePipe.getdel(`session:${sessionId}`);
   gatePipe.incr(`ratelimit:email:${emailLower}`);
@@ -88,7 +66,7 @@ export default async function handler(req, res) {
     return res.status(429).json({ error: GENERIC_ERROR });
   }
 
-  // 6. Decode scores using the session secret
+  // 5. Decode scores using the session secret
   if (!session || !session.secret) {
     console.log('[REJECT] session', 'Invalid or expired session');
     return res.status(403).json({ error: GENERIC_ERROR });
@@ -100,7 +78,7 @@ export default async function handler(req, res) {
   }
   const { score, baseScore } = decoded;
 
-  // 7. Validate decoded score values
+  // 6. Validate decoded score values
   const scoreError = validateScores(score, baseScore);
   if (scoreError) {
     console.log('[REJECT] input', JSON.stringify({
@@ -122,7 +100,7 @@ export default async function handler(req, res) {
   }
   const elapsedSeconds = sessionCheck.elapsed;
 
-  // 8. Persist score, player data, and username claim in one round-trip.
+  // 7. Persist score, player data, and username claim in one round-trip.
   // baseScore + elapsedSeconds are stored for forensic auditing of suspicious
   // top scores; they don't affect the leaderboard ranking.
   const writePipe = redis.pipeline();
@@ -146,7 +124,7 @@ export default async function handler(req, res) {
     bonusRatio: baseScore ? +((score - baseScore) / baseScore).toFixed(2) : null,
   }));
 
-  // 7. Klaviyo call — deferred via waitUntil so the response returns immediately
+  // 8. Klaviyo call — deferred via waitUntil so the response returns immediately
   const isoCountry = req.headers['x-vercel-ip-country'] || null;
   const country = resolveCountryName(isoCountry);
   console.log('[KLAVIYO] start', { email: emailLower, name: name.trim(), score, isoCountry, country });
@@ -155,7 +133,7 @@ export default async function handler(req, res) {
       .catch((err) => console.error('[KLAVIYO] unexpected error', err))
   );
 
-  // 9. Fetch rank, cached top 10, and actual stored score in one round-trip
+  // 9. Fetch rank, cached top 10, and actual stored score in one round-trip, cached top 10, and actual stored score in one round-trip
   const readPipe = redis.pipeline();
   readPipe.zrevrank('leaderboard', emailLower);
   readPipe.get(TOP_TEN_CACHE_KEY);
@@ -170,6 +148,7 @@ export default async function handler(req, res) {
     : cachedTopTen ?? await rebuildAndCacheTopTen();
 
   // 10. Return response
+
   res.status(200).json({
     rank,
     topTen,
@@ -184,24 +163,6 @@ function validateSession(session, score) {
   // Plausibility: each kick cycle takes ~1 second minimum
   if (score > elapsed * 1.5) return { error: 'Score not plausible for session duration', elapsed };
   return { error: null, elapsed };
-}
-
-async function verifyTurnstile(token, ip) {
-  if (!token) return 'Missing Turnstile token';
-
-  const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      secret: process.env.TURNSTILE_SECRET_KEY,
-      response: token,
-      remoteip: ip,
-    }),
-  });
-  const data = await res.json();
-
-  if (!data.success) return 'Bot verification failed';
-  return null;
 }
 
 function validateIdentity(name, email) {
